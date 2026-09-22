@@ -140,7 +140,7 @@ with col4:
   )
 
 # ==========================================
-# 核心執行按鈕（使用 3.8 Flash / 3.1 Pro / 3.5 Flash-Lite）
+# 核心執行按鈕（採用 3.8 Flash 與 3.5 Flash-Lite 雙備援）
 # ==========================================
 if st.button("🚀 推薦最佳出發檔期與航班 ＋ 產出專屬自由行行程", type="primary"):
   if not gemini_api_key:
@@ -192,17 +192,13 @@ if st.button("🚀 推薦最佳出發檔期與航班 ＋ 產出專屬自由行�
 4. **推車友善住宿區域推薦**：
    - 推薦 1~2 個最方便的地鐵站或住宿區域（有電梯直達、有機場直達車或短程計程車友善）。
 5. **爸媽/照顧者專屬叮嚀**：
-   - 針對同行小孩年齡的行前必備清單與餐廳挑選守則。
+   - 針對同行小孩年齡的行前必帶清單與餐廳挑選守則。
 
 請使用清晰的 Markdown 標題、重點粗體與表格呈現完整企劃書。
 """
 
-      # 採用截圖中的最新模型版本進行呼叫與備援
-      models_to_try = [
-          "gemini-3.8-flash",
-          "gemini-3.1-pro",
-          "gemini-3.5-flash-lite",
-      ]
+      # 鎖定目前完全支援 generateContent 的 3.8 Flash 與 3.5 Flash-Lite
+      models_to_try = ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
       success = False
 
       for model_name in models_to_try:
@@ -210,11 +206,12 @@ if st.button("🚀 推薦最佳出發檔期與航班 ＋ 產出專屬自由行�
           response = ai_client.models.generate_content(
               model=model_name, contents=prompt
           )
-          st.success(f"🎉 規劃完成！（使用模型節點：{model_name}）")
+          st.success(f"🎉 規劃完成！（使用模型：{model_name}）")
           st.markdown(response.text)
           success = True
           break
         except APIError as e:
+          # 若遇 503 暫時忙碌，稍等 1 秒切換至 Flash-Lite 備援
           if e.code == 503 or "503" in str(e):
             time.sleep(1)
             continue
@@ -227,5 +224,5 @@ if st.button("🚀 推薦最佳出發檔期與航班 ＋ 產出專屬自由行�
 
       if not success:
         st.warning(
-            "⚠️ 目前伺服器流量較大，請稍候 10~20 秒後再次點擊按鈕重試！"
+            "⚠️ 目前伺服器瞬間流量較大，請稍候 10 秒後再次點擊按鈕即可！"
         )
