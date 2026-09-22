@@ -1,4 +1,4 @@
-Plaintext
+
 streamlit
 amadeus
 google-genai
