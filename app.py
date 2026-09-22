@@ -27,20 +27,54 @@ FAMILY_MEMBERS = [
 st.sidebar.dataframe(pd.DataFrame(FAMILY_MEMBERS), hide_index=True)
 st.sidebar.info("💡 限制已鎖定：\n- 嚴格直飛（不接受轉機）\n- 排除紅眼/清晨極端航班\n- 包含幼兒推車動線規劃")
 
-# 旅客計算：2 位成人、1 位 2-11 歲兒童 (Amadeus 幼童佔位票)
 adult_cnt = 2
 child_cnt = 1
 
 # ==========================================
-# 主畫面：行程輸入
+# 主畫面：行程輸入（出發地與目的地皆改為下拉選單）
 # ==========================================
 st.title("✈️ 小家庭（2 大 1 小）全年最佳機票 ＋ AI 親子自由行規劃")
 
+# 出發機場選項清單
+ORIGIN_OPTIONS = {
+    "台北桃園 (TPE)": "TPE",
+    "台北松山 (TSA)": "TSA",
+    "高雄小港 (KHH)": "KHH",
+    "台中清泉崗 (RMQ)": "RMQ"
+}
+
+# 目的地熱門機場選項清單（中文名稱方便選取）
+DEST_OPTIONS = {
+    "🇯🇵 日本 - 福岡 (FUK) [航程短、推車超友善首選]": "FUK",
+    "🇯🇵 日本 - 沖繩那霸 (OKA) [航程僅 1.5 hr、適合自駕]": "OKA",
+    "🇯🇵 日本 - 東京成田 (NRT)": "NRT",
+    "🇯🇵 日本 - 東京羽田 (HND)": "HND",
+    "🇯🇵 日本 - 大阪關西 (KIX)": "KIX",
+    "🇯🇵 日本 - 名古屋 (NGO)": "NGO",
+    "🇯🇵 日本 - 札幌新千歲 (CTS)": "CTS",
+    "🇰🇷 韓國 - 首爾仁川 (ICN)": "ICN",
+    "🇰🇷 韓國 - 首爾金浦 (GMP)": "GMP",
+    "🇰🇷 韓國 - 釜山金海 (PUS)": "PUS",
+    "🇸🇬 新加坡 - 樟宜 (SIN) [親子設施完備]": "SIN",
+    "🇹🇭 泰國 - 曼谷蘇凡納布 (BKK)": "BKK",
+    "🇻🇳 越南 - 峴港 (DAD) [度假飯店放鬆]": "DAD",
+    "🇭🇰 香港 - 赤鱲角 (HKG)": "HKG",
+    "🌐 其他（自行輸入 3 碼機場代碼）": "CUSTOM"
+}
+
 col1, col2, col3 = st.columns(3)
+
 with col1:
-    origin = st.text_input("出發機場 (IATA)", value="TPE").upper()
+    origin_label = st.selectbox("出發機場", options=list(ORIGIN_OPTIONS.keys()), index=0)
+    origin = ORIGIN_OPTIONS[origin_label]
+
 with col2:
-    destination = st.text_input("目的地機場 (IATA)", value="FUK").upper()  # 範例：福岡，適合 3 歲幼兒
+    dest_label = st.selectbox("目的地機場", options=list(DEST_OPTIONS.keys()), index=0)
+    if DEST_OPTIONS[dest_label] == "CUSTOM":
+        destination = st.text_input("請輸入機場代碼 (如 LAX)", value="LAX").upper()
+    else:
+        destination = DEST_OPTIONS[dest_label]
+
 with col3:
     trip_days = st.number_input("預計旅遊天數", min_value=3, max_value=10, value=5)
 
@@ -59,10 +93,10 @@ if st.button("🚀 掃描全年最佳親子出發日與航班", type="primary"):
     else:
         with st.status("正在為 2 大 1 小家庭尋找最佳旅遊檔期...", expanded=True) as status:
             try:
-                status.write("🔍 步驟 1/3：掃描直飛航班與票價波谷（過濾轉機與不友善時段）...")
+                status.write(f"🔍 步驟 1/3：正在針對【{destination}】掃描直飛航班與票價波谷...")
                 amadeus = Client(client_id=amadeus_key, client_secret=amadeus_secret)
 
-                # 挑選接下來數個月份的合適日期（避開極端炎夏）
+                # 挑選接下來數個月份的合適日期
                 today = date.today()
                 sample_dates = [
                     today + timedelta(days=45),
@@ -120,7 +154,7 @@ if st.button("🚀 掃描全年最佳親子出發日與航班", type="primary"):
                         continue
 
                 if not candidate_flights:
-                    status.update(label="未能找到符合條件的直飛班機，請嘗試調整目的地或放寬日期！", state="error")
+                    status.update(label="未能找到符合條件的直飛班機，請嘗試調整目的地或放寬天數！", state="error")
                     st.stop()
 
                 # 取票價最親民、時間最舒適的組合
