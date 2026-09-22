@@ -1,0 +1,5 @@
+Plaintext
+streamlit
+amadeus
+google-genai
+pandas
