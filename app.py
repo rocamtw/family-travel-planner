@@ -1,33 +1,68 @@
 import streamlit as st
-import pandas as pd
 from google import genai
 
-st.set_page_config(page_title="小家庭 3 人自由行與機票推薦器", layout="wide")
+st.set_page_config(page_title="家庭親子自由行與機票推薦器", layout="wide")
 
 # ==========================================
 # 自動從 Secrets 讀取金鑰
 # ==========================================
 gemini_api_key = st.secrets.get("GEMINI_KEY", "")
 
-st.title("✈️ 小家庭（2 大 1 小）全年最佳機票 ＋ AI 親子自由行規劃")
+st.title("✈️ 家庭專屬 全年最佳機票 ＋ AI 自由行客製化規劃")
 
 if not gemini_api_key:
     st.warning("⚠️ 系統尚未在 Streamlit Secrets 偵測到 GEMINI_KEY，請至後台 Settings -> Secrets 完成設定。")
 
 # ==========================================
-# 家族成員配置（已鎖定）
+# 區塊 1：彈性成員配置（下拉式選單）
 # ==========================================
-with st.expander("👨‍👩‍👧 查看本次家庭成員與行程偏好（已鎖定）", expanded=False):
-    FAMILY_MEMBERS = [
-        {"成員": "爸爸 (本人)", "身分": "成人", "需求": "主要搬運、推車支援"},
-        {"成員": "媽媽 (老婆)", "身分": "成人", "需求": "照顧幼兒作息"},
-        {"成員": "小孩 (約 3 歲)", "身分": "幼童 (3歲)", "需求": "必備推車、需午睡、作息正常"},
-    ]
-    st.dataframe(pd.DataFrame(FAMILY_MEMBERS), hide_index=True)
-    st.info("🎯 系統原則：嚴格直飛 ｜ 排除紅眼與清晨 ｜ 每日下午保留午睡 ｜ 推車電梯平緩動線")
+with st.expander("👨‍👩‍👧‍👦 成員配置與體力需求（點此自訂）", expanded=True):
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    
+    with col_m1:
+        adult_count = st.selectbox(
+            "成人人數",
+            options=[1, 2, 3, 4, 5, 6],
+            index=1,  # 預設 2 大
+            help="包含爸媽等一般成人"
+        )
+    with col_m2:
+        child_count = st.selectbox(
+            "小孩人數",
+            options=[0, 1, 2, 3, 4],
+            index=1,  # 預設 1 小
+            help="未滿 12 歲孩童"
+        )
+    with col_m3:
+        if child_count > 0:
+            child_age_label = st.selectbox(
+                "小孩年齡主要分佈",
+                options=[
+                    "幼童 (約 2~3 歲，需午睡與推車)",
+                    "學齡前 (4~6 歲，體力中等、需適度休息)",
+                    "學齡兒童 (7~12 歲，活動力強)",
+                    "嬰幼兒 (未滿 2 歲，需熱水泡奶/副食品)"
+                ],
+                index=0
+            )
+        else:
+            child_age_label = "無小孩同行"
+    with col_m4:
+        senior_option = st.selectbox(
+            "是否有長輩同行？",
+            options=["無長輩", "有長輩 (65歲以上，需多坐多休息、早睡)", "有行動不便長輩 (需輪椅輔助)"],
+            index=0
+        )
+
+    # 推車與無障礙特別需求
+    col_req1, col_req2 = st.columns(2)
+    with col_req1:
+        need_stroller = st.checkbox("需攜帶嬰兒推車（要求全程平緩動線、電梯優先）", value=True if child_count > 0 else False)
+    with col_req2:
+        strict_flight_time = st.checkbox("航班嚴格避開紅眼與極端清晨（限 09:00 - 15:00 起飛）", value=True)
 
 # ==========================================
-# 行程輸入選項（下拉選單）
+# 區塊 2：行程與彈性日期設定（下拉選單）
 # ==========================================
 ORIGIN_OPTIONS = {
     "台北桃園 (TPE)": "TPE (台北桃園)",
@@ -54,7 +89,17 @@ DEST_OPTIONS = {
     "🌐 其他（自行輸入）": "CUSTOM"
 }
 
-col1, col2, col3 = st.columns(3)
+# 彈性出發時段選項
+FLEXIBLE_TIME_OPTIONS = [
+    "全年度皆可（請推薦最避開極端氣候與票價最划算的 2~3 個黃金時段）",
+    "近期出發（未來 1~3 個月內最佳週末或時段）",
+    "春季出遊（3 月 ~ 5 月，賞花、氣候溫和）",
+    "秋季出遊（9 月 ~ 11 月，避開酷暑、秋高氣爽）",
+    "冬季出遊（12 月 ~ 2 月，避寒或賞雪體驗）",
+    "連假前後避人潮時段（避開連續假期天價機票與人擠人）"
+]
+
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     origin_label = st.selectbox("出發機場", options=list(ORIGIN_OPTIONS.keys()), index=0)
@@ -68,45 +113,63 @@ with col2:
         dest_text = DEST_OPTIONS[dest_label]
 
 with col3:
+    flexible_time = st.selectbox("彈性出發時段偏好", options=FLEXIBLE_TIME_OPTIONS, index=0)
+
+with col4:
     trip_days = st.number_input("預計旅遊天數", min_value=3, max_value=10, value=5)
 
 # ==========================================
 # 核心執行按鈕
 # ==========================================
-if st.button("🚀 推薦全年最佳時段與直飛航班 ＋ 產出 AI 行程", type="primary"):
+if st.button("🚀 推薦最佳出發檔期與航班 ＋ 產出專屬自由行行程", type="primary"):
     if not gemini_api_key:
         st.error("找不到 Gemini API 金鑰，請先在 Streamlit 後台 Settings -> Secrets 中設定 GEMINI_KEY！")
     else:
-        with st.spinner(f"正在為一家三口全面分析【{dest_text}】的最佳出遊月份、直飛航班與親子自由行企劃..."):
+        member_desc = f"{adult_count} 位成人"
+        if child_count > 0:
+            member_desc += f"、{child_count} 位小孩（{child_age_label}）"
+        if senior_option != "無長輩":
+            member_desc += f"、同行長輩情況：{senior_option}"
+        if need_stroller:
+            member_desc += "，需全程推嬰兒推車"
+
+        with st.spinner(f"正在為【{member_desc}】全面分析【{dest_text}】的彈性出發檔期與客製化自由行..."):
             try:
                 ai_client = genai.Client(api_key=gemini_api_key)
 
                 prompt = f"""
-你是一位專門為「育兒家庭（幼童同行）」提供旅遊顧問服務的專家。
-請為一組家庭（爸爸、媽媽、一位約 3 歲的幼童）規劃一次出遊。
+你是一位專門為「家庭出遊（幼童/長輩三代同行）」提供深度旅遊諮詢的資深顧問。
+請根據以下明確的家庭成員結構與彈性出發偏好，規劃一份量身打造的機票建議與 {trip_days} 天自由行完整企劃。
 
-【出遊基本條件】
-- 出發地：{origin_text}
-- 目的地：{dest_text}
+【旅客成員配置】
+- 成人：{adult_count} 位
+- 孩童：{child_count} 位（屬性：{child_age_label}）
+- 長輩狀況：{senior_option}
+- 嬰兒推車 / 行動需求：{'需全程考量嬰兒推車或無障礙動線（避開樓梯、陡坡，指定電梯出口）' if need_stroller else '一般步行動線'}
+- 航班舒適度要求：{'起飛嚴格限制在 09:00 - 15:00 之間，不搭紅眼與極早清晨拉車' if strict_flight_time else '彈性時段'}
+
+【出發與目的地】
+- 出發地點：{origin_text}
+- 目的地點：{dest_text}
 - 預計天數：{trip_days} 天
-- 成員：2 位成人、1 位 3 歲幼兒（全程攜帶嬰兒推車）
+- 彈性時段偏好：{flexible_time}
 
-【核心限制】
-1. **全年最適合時間與氣候**：
-   - 避開當地盛夏酷暑（幼兒容易中暑）、嚴寒、雨季或颱風季，推薦出「全年度最舒服、最適合 3 歲小孩體感的 2~3 個最佳月份區間」。
-   - 同時標註這幾個月份的機票價格趨勢與避開人潮建議。
-2. **航班直飛建議**：
-   - 推薦最適合該家庭的真實航空公司與班次（如長榮、華航、星宇、國泰或日系航空）。
-   - 起飛時間嚴格限制在 09:00 - 15:00 之間（拒絕清晨 07:00 前拉車，拒絕 21:00 後抵達），估算「2 大 1 小」的平均機票總預算（TWD）。
-3. **專屬親子每日行程（{trip_days} 天）**：
-   - 每日節奏：上午 1 個景點，中午舒服用餐，下午 13:30 - 15:30 必須安排「回飯店午休」或「在推車上熟睡的平坦散步道」，傍晚/晚間輕鬆行程，20:30 前回飯店。
-   - 動線友善：標註電梯動線、有無障礙坡道、是否有乾淨尿布台與育嬰室。
-4. **住宿與交通配置**：
-   - 推薦住在哪個地鐵站周邊最推車友善、去機場最方便。
-   - 標明何時建議搭乘計程車（短程免搬推車）。
-5. **打包與行前注意事項**：針對 3 歲幼兒必備的用品與餐廳挑選提醒。
+【企劃輸出規範】
+1. **最佳出發檔期與氣候深度評估**：
+   - 依據「{flexible_time}」的條件，推薦出 2~3 個最理想的出發週別或月份。
+   - 針對同行的小孩（{child_age_label}）及長輩體感，詳細說明該時段的均溫、降雨機率，並說明如何避開當地連假、人潮與昂貴票價波峰。
+2. **直飛航班推薦與預算估算**：
+   - 推薦直飛該航點的具體航空公司與航班時段（如去程 09:00~11:00 起飛、回程 14:00~16:00 起飛）。
+   - 估算全家【{adult_count} 大 {child_count} 小】的來回直飛機票總預算區間（以新台幣 TWD 計）。
+3. **客製化 {trip_days} 天每日行程**：
+   - 節奏控制：上午 1 個精華景點，中午舒適餐廳；下午 13:30 - 15:30 嚴格安排「午睡/飯店小憩或平坦綠地散步」；傍晚輕鬆採買或景點；20:30 前回飯店就寢。
+   - 標註設施：清楚標記「推車友善程度」、「有無哺乳室/尿布台」、「短程是否強烈建議搭計程車」。
+4. **推車友善住宿區域推薦**：
+   - 推薦 1~2 個最方便的地鐵站或住宿聚落（需有電梯直達、有機場直達車或短程計程車友善）。
+5. **爸媽/照顧者專屬叮嚀**：
+   - 針對同行小孩年齡的行前必帶清單（藥品、常溫粥、安撫用品等）與餐廳挑選守則。
 
-請以清晰排版（多用條列與表格）呈現完整企劃書。
+請使用清晰的 Markdown 標題、重點粗體與表格呈現這份專屬企劃書。
 """
 
                 response = ai_client.models.generate_content(
@@ -114,7 +177,7 @@ if st.button("🚀 推薦全年最佳時段與直飛航班 ＋ 產出 AI 行程"
                     contents=prompt
                 )
 
-                st.success("🎉 已完成全年度最佳檔期分析與專屬親子自由行企劃！")
+                st.success("🎉 已成功生成專屬家庭自由行與彈性出發期企劃！")
                 st.markdown(response.text)
 
             except Exception as e:
