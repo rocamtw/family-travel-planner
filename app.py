@@ -110,7 +110,7 @@ if st.button("🚀 推薦全年最佳時段與直飛航班 ＋ 產出 AI 行程"
 """
 
                 response = ai_client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-3.6-flash',
                     contents=prompt
                 )
 
