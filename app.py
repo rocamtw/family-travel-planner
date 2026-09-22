@@ -1,10 +1,11 @@
 from datetime import date, timedelta
+import time
 from google import genai
 from google.genai.errors import APIError
 import streamlit as st
 
 st.set_page_config(
-    page_title="家庭自由行與預算智囊（旗艦版）", layout="wide"
+    page_title="家庭自由行與預算智囊（旗艦防錯版）", layout="wide"
 )
 
 # ==========================================
@@ -31,6 +32,26 @@ if "base_plan_content" not in st.session_state:
   st.session_state.base_plan_content = ""
 if "rainy_plan_content" not in st.session_state:
   st.session_state.rainy_plan_content = ""
+
+
+# 通用呼叫函式：具備 503 自動備援切換與重試
+def generate_content_with_fallback(client, contents_input):
+  models_to_try = ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
+  for model_name in models_to_try:
+    try:
+      resp = client.models.generate_content(
+          model=model_name, contents=contents_input
+      )
+      return resp.text, None
+    except APIError as e:
+      if e.code == 503 or "503" in str(e):
+        time.sleep(1)
+        continue
+      return None, f"API 錯誤：{e}"
+    except Exception as e:
+      return None, f"執行錯誤：{e}"
+  return None, "伺服器瞬間連線量較大，請稍候 5 秒後重試！"
+
 
 # ==========================================
 # 區塊 1：彈性成員配置
@@ -219,32 +240,17 @@ if st.button("🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整�
    - 標記各點的推車友善度與無障礙電梯位置。
 """
 
-      models_to_try = ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
-      plan_text = ""
-
-      for model_name in models_to_try:
-        try:
-          response = ai_client.models.generate_content(
-              model=model_name, contents=base_prompt
-          )
-          plan_text = response.text
-          st.session_state.base_plan_content = plan_text
-          st.session_state.plan_generated = True
-          st.session_state.rainy_plan_content = ""
-          st.session_state.chat_history = [
-              {"role": "user", "parts": base_prompt},
-              {"role": "model", "parts": plan_text},
-          ]
-          break
-        except APIError as e:
-          if e.code == 503 or "503" in str(e):
-            continue
-          else:
-            st.error(f"執行時發生錯誤：{e}")
-            break
-        except Exception as e:
-          st.error(f"執行時發生錯誤：{e}")
-          break
+      plan_text, err = generate_content_with_fallback(ai_client, base_prompt)
+      if plan_text:
+        st.session_state.base_plan_content = plan_text
+        st.session_state.plan_generated = True
+        st.session_state.rainy_plan_content = ""
+        st.session_state.chat_history = [
+            {"role": "user", "parts": base_prompt},
+            {"role": "model", "parts": plan_text},
+        ]
+      else:
+        st.error(err)
 
 # ==========================================
 # 顯示結果與四大強化功能
@@ -260,11 +266,11 @@ if st.session_state.plan_generated:
       mime="text/markdown",
   )
 
-  # 主行程呈現（含功能 1 的 Google Maps 導航連結）
+  # 主行程呈現
   st.markdown(st.session_state.base_plan_content)
 
   # ==========================================
-  # 功能 2：雨天／突發狀況一鍵室內備案
+  # 功能 2：雨天／突發狀況一鍵室內備案（已加入防錯備援）
   # ==========================================
   st.markdown("---")
   st.subheader("☔ 氣候應變：雨天 / 小孩體力不佳 室內備案專區")
@@ -272,19 +278,19 @@ if st.session_state.plan_generated:
   with col_rain_btn:
     if st.button("🔄 一鍵切換全室內親子備案行程", type="secondary"):
       with st.spinner("正在將戶外點轉換為大型室內樂園、友善商場與水族館..."):
-        try:
-          ai_client = genai.Client(api_key=gemini_api_key)
-          rain_prompt = (
-              "請針對剛才為我們規劃的行程，提供一套完整的【全室內雨天替代備案】。"
-              f"針對目的地【{dest_text}】，將所有戶外景點替換成大商場室內樂園、水族館、大型科學館或室內推車平緩設施，並附上"
-              " Google Maps 連結與哺乳室標註。"
-          )
-          rain_resp = ai_client.models.generate_content(
-              model="gemini-3.8-flash", contents=rain_prompt
-          )
-          st.session_state.rainy_plan_content = rain_resp.text
-        except Exception as e:
-          st.error(f"備案生成錯誤：{e}")
+        ai_client = genai.Client(api_key=gemini_api_key)
+        rain_prompt = (
+            "請針對剛才為我們規劃的行程，提供一套完整的【全室內雨天替代備案】。"
+            f"針對目的地【{dest_text}】，將所有戶外景點替換成大商場室內樂園、水族館、大型科學館或室內推車平緩設施，並附上"
+            " Google Maps 連結與哺乳室標註。"
+        )
+        rain_resp_text, rain_err = generate_content_with_fallback(
+            ai_client, rain_prompt
+        )
+        if rain_resp_text:
+          st.session_state.rainy_plan_content = rain_resp_text
+        else:
+          st.error(f"備案生成錯誤：{rain_err}")
 
   if st.session_state.rainy_plan_content:
     st.info("🌧️ 以下為雨天 / 室內友善備用方案：")
@@ -324,7 +330,7 @@ if st.session_state.plan_generated:
       st.checkbox("尿布（按天數 × 5 片計算）", value=False)
 
   # ==========================================
-  # 延伸對話互動（Chat 系統）
+  # 延伸對話互動（Chat 系統，已加入防錯備援）
   # ==========================================
   st.markdown("---")
   st.subheader("💬 專屬 AI 旅行顧問線上對話（隨時微調行程）")
@@ -342,21 +348,20 @@ if st.session_state.plan_generated:
 
     with st.chat_message("assistant"):
       with st.spinner("AI 顧問正在為你調整企劃與試算..."):
-        try:
-          ai_client = genai.Client(api_key=gemini_api_key)
-          formatted_contents = []
-          for h in st.session_state.chat_history:
-            formatted_contents.append(
-                {"role": h["role"], "parts": [{"text": h["parts"]}]}
-            )
+        ai_client = genai.Client(api_key=gemini_api_key)
+        formatted_contents = []
+        for h in st.session_state.chat_history:
+          formatted_contents.append(
+              {"role": h["role"], "parts": [{"text": h["parts"]}]}
+          )
 
-          chat_resp = ai_client.models.generate_content(
-              model="gemini-3.8-flash", contents=formatted_contents
-          )
-          reply_text = chat_resp.text
-          st.write(reply_text)
+        chat_reply, chat_err = generate_content_with_fallback(
+            ai_client, formatted_contents
+        )
+        if chat_reply:
+          st.write(chat_reply)
           st.session_state.chat_history.append(
-              {"role": "model", "parts": reply_text}
+              {"role": "model", "parts": chat_reply}
           )
-        except Exception as err:
-          st.error(f"對話產生錯誤：{err}")
+        else:
+          st.error(f"對話產生錯誤：{chat_err}")
