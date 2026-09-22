@@ -5,7 +5,7 @@ from google.genai.errors import APIError
 import streamlit as st
 
 st.set_page_config(
-    page_title="家庭自由行與預算智囊（聯網搜尋版）", layout="wide"
+    page_title="家庭自由行與預算智囊（旗艦防錯版）", layout="wide"
 )
 
 # ==========================================
@@ -34,31 +34,43 @@ if "rainy_plan_content" not in st.session_state:
   st.session_state.rainy_plan_content = ""
 
 
-# 通用呼叫函式：具備 Google Search 聯網與 503 自動備援切換
+# 通用呼叫函式：具備 429 配額重試、503 備援與 Search 自動降級機制
 def generate_content_with_fallback(
     client, contents_input, enable_search=False
 ):
   models_to_try = ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
 
-  # 設定是否啟用 Google Search Grounding 聯網工具
-  call_config = {}
+  # 建立調用組合：若有開啟 search，遇 429 時會自動退回一般無 search 模式
+  configs = []
   if enable_search:
-    call_config = {"tools": [{"google_search": {}}]}
+    configs.append({"tools": [{"google_search": {}}]})
+  configs.append({})  # 純模型標準模式（保底）
 
   for model_name in models_to_try:
-    try:
-      resp = client.models.generate_content(
-          model=model_name, contents=contents_input, config=call_config
-      )
-      return resp.text, None
-    except APIError as e:
-      if e.code == 503 or "503" in str(e):
-        time.sleep(1)
-        continue
-      return None, f"API 錯誤：{e}"
-    except Exception as e:
-      return None, f"執行錯誤：{e}"
-  return None, "伺服器瞬間連線量較大，請稍候 5 秒後重試！"
+    for call_config in configs:
+      for attempt in range(2):  # 最多重試 2 次
+        try:
+          resp = client.models.generate_content(
+              model=model_name, contents=contents_input, config=call_config
+          )
+          return resp.text, None
+        except APIError as e:
+          err_msg = str(e)
+          # 遇 429 配額限制或 503 忙碌，短暫暫停退避重試
+          if e.code == 429 or "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+            time.sleep(2.5)
+            continue
+          elif e.code == 503 or "503" in err_msg:
+            time.sleep(1.5)
+            continue
+          else:
+            break
+        except Exception:
+          break
+  return (
+      None,
+      "免費 API 瞬間請求流量較大（429 配額保護），請稍候 10~15 秒後再次點擊！",
+  )
 
 
 # ==========================================
@@ -186,8 +198,14 @@ with col5:
       "偏好的住宿檔次與每晚預算", options=HOTEL_LEVEL_OPTIONS, index=0
   )
 
+# 可選開關：預設關閉聯網，避免撞到 Search 配額
+use_live_search = st.checkbox(
+    "啟用 Google 即時聯網搜尋（若遇到 429 配額錯誤時可取消勾選以提升穩定度）",
+    value=False,
+)
+
 # ==========================================
-# 核心執行按鈕：產出主行程與預算（開啟聯網搜尋）
+# 核心執行按鈕：產出主行程與預算
 # ==========================================
 if st.button("🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整行程", type="primary"):
   if not gemini_api_key:
@@ -209,13 +227,13 @@ if st.button("🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整�
       member_desc += "，需全程推嬰兒推車"
 
     with st.spinner(
-        f"🌐 正在透過 Google 搜尋即時資訊並試算【{dest_text}】最新機票/住宿與行程..."
+        f"正在為【{member_desc}】試算機票/住宿總預算，並生成【{dest_text}】客製化行程..."
     ):
       ai_client = genai.Client(api_key=gemini_api_key)
 
       base_prompt = f"""
 你是一位專門為「家庭出遊（幼童同行）」提供全方位旅遊顧問服務的資深專家。
-請利用即時 Google 搜尋工具查驗最新航線與景點營運狀況，規劃一份包含【全行程各項花費預抓與總預算試算】與【{trip_days} 天詳細行程】的專業企劃書。
+請規劃一份包含【全行程各項花費預抓與總預算試算】與【{trip_days} 天詳細行程】的專業企劃書。
 
 【時間基準】
 - 今日基準日：{today.strftime('%Y 年 %m 月 %d 日')}
@@ -229,9 +247,9 @@ if st.button("🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整�
 
 【企劃輸出規範】
 1. **最佳出發時段評估**：針對幼童與長輩體感，推薦 2 個近期最舒適且避開人潮與天價機票的檔期。
-2. **即時直飛航班推薦**：請聯網搜尋確認目前該航點真實直飛的航空公司與實際班次時段。
+2. **直飛航班推薦**：推薦具體航空公司與合適起飛時段。
 3. **住宿推薦與房型建議**：
-   - 推薦 2~3 間適合該家庭結構的具體飯店或區域（請確認是否有整修或休館，備註推車電梯直達、生活機能）。
+   - 推薦 2~3 間適合該家庭結構的具體飯店或區域（備註推車電梯直達、生活機能）。
    - 包含超連結格式：例如 `[在 Google 地圖查看飯店](https://www.google.com/maps/search/?api=1&query=飯店名稱)`。
 4. **💰 全行程花費預估表（全家 {adult_count} 大 {child_count} 小 總花費，以新台幣 TWD 計算）**：
    請列出清晰的預算彙整表格，包含：
@@ -248,9 +266,8 @@ if st.button("🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整�
    - 標記各點的推車友善度與無障礙電梯位置。
 """
 
-      # 開啟 Google Search 聯網檢索
       plan_text, err = generate_content_with_fallback(
-          ai_client, base_prompt, enable_search=True
+          ai_client, base_prompt, enable_search=use_live_search
       )
       if plan_text:
         st.session_state.base_plan_content = plan_text
@@ -281,22 +298,22 @@ if st.session_state.plan_generated:
   st.markdown(st.session_state.base_plan_content)
 
   # ==========================================
-  # 功能 2：雨天／突發狀況一鍵室內備案（亦支援聯網）
+  # 功能 2：雨天／突發狀況一鍵室內備案
   # ==========================================
   st.markdown("---")
   st.subheader("☔ 氣候應變：雨天 / 小孩體力不佳 室內備案專區")
   col_rain_btn, _ = st.columns([2, 5])
   with col_rain_btn:
     if st.button("🔄 一鍵切換全室內親子備案行程", type="secondary"):
-      with st.spinner("🌐 正在聯網搜尋最新室內大型商場、水族館與推車友善設施..."):
+      with st.spinner("正在規劃全室內大型商場、水族館與推車友善設施..."):
         ai_client = genai.Client(api_key=gemini_api_key)
         rain_prompt = (
             "請針對剛才為我們規劃的行程，提供一套完整的【全室內雨天替代備案】。"
-            f"針對目的地【{dest_text}】，將所有戶外景點替換成大商場室內樂園、水族館、大型科學館或室內推車平緩設施，請搜尋確認目前皆正常營業，並附上"
+            f"針對目的地【{dest_text}】，將所有戶外景點替換成大商場室內樂園、水族館、大型科學館或室內推車平緩設施，並附上"
             " Google Maps 連結與哺乳室標註。"
         )
         rain_resp_text, rain_err = generate_content_with_fallback(
-            ai_client, rain_prompt, enable_search=True
+            ai_client, rain_prompt, enable_search=False
         )
         if rain_resp_text:
           st.session_state.rainy_plan_content = rain_resp_text
@@ -341,7 +358,7 @@ if st.session_state.plan_generated:
       st.checkbox("尿布（按天數 × 5 片計算）", value=False)
 
   # ==========================================
-  # 延伸對話互動（Chat 系統，支援聯網解答最新資訊）
+  # 延伸對話互動（Chat 系統）
   # ==========================================
   st.markdown("---")
   st.subheader("💬 專屬 AI 旅行顧問線上對話（隨時微調行程）")
@@ -358,7 +375,7 @@ if st.session_state.plan_generated:
     st.session_state.chat_history.append({"role": "user", "parts": user_query})
 
     with st.chat_message("assistant"):
-      with st.spinner("AI 顧問正在聯網檢索並為你調整企劃與試算..."):
+      with st.spinner("AI 顧問正在為你調整企劃與試算..."):
         ai_client = genai.Client(api_key=gemini_api_key)
         formatted_contents = []
         for h in st.session_state.chat_history:
@@ -367,7 +384,7 @@ if st.session_state.plan_generated:
           )
 
         chat_reply, chat_err = generate_content_with_fallback(
-            ai_client, formatted_contents, enable_search=True
+            ai_client, formatted_contents, enable_search=False
         )
         if chat_reply:
           st.write(chat_reply)
