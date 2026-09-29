@@ -39,14 +39,14 @@ def stream_gemini_fast(client, contents_input):
     yield "\n\n⚠️ 伺服器忙碌，請稍候再試！"
 
 # ==========================================
-# 區塊 1：家庭成員配置
+# 區塊 1：家庭成員配置（支援手動輸入人數）
 # ==========================================
 with st.expander("👨‍👩‍👧‍👦 成員配置與體力需求（點此展開修改）", expanded=False):
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
     with col_m1:
-        adult_count = st.selectbox("成人人數", options=[1, 2, 3, 4, 5, 6], index=1)
+        adult_count = st.number_input("成人人數", min_value=1, max_value=20, value=2, step=1, help="可直接輸入或按加減")
     with col_m2:
-        child_count = st.selectbox("小孩人數", options=[0, 1, 2, 3, 4], index=1)
+        child_count = st.number_input("小孩人數", min_value=0, max_value=10, value=1, step=1, help="未滿 12 歲孩童")
     with col_m3:
         child_age_label = st.selectbox(
             "小孩年齡分佈",
@@ -81,6 +81,7 @@ DEST_OPTIONS = {
     "🇯🇵 日本 - 名古屋 (NGO)": "名古屋 (NGO)",
     "🇯🇵 日本 - 札幌新千歲 (CTS)": "札幌 (CTS)",
     "🇰🇷 韓國 - 首爾仁川 (ICN)": "首爾仁川 (ICN)",
+    "🇰🇷 韓國 - 首爾金浦 (GMP)": "首爾金浦 (GMP)",
     "🇰🇷 韓國 - 釜山金海 (PUS)": "釜山 (PUS)",
     "🇸🇬 新加坡 - 樟宜 (SIN)": "新加坡 (SIN)",
     "🇹🇭 泰國 - 曼谷 (BKK)": "曼谷 (BKK)",
@@ -118,6 +119,7 @@ with col4:
         options=[
             "近期出發（未來 1~3 個月推薦最舒適月份）",
             "全年度最佳月份（氣候好且避開人潮）",
+            "全年度最佳月份（氣候舒適熱鬧，不避開人潮）",
             "春季出遊（3~5 月）",
             "秋季出遊（9~11 月）",
             "冬季出遊（12~2 月）"
@@ -158,6 +160,11 @@ if st.button("🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整�
 - 使用者已指定旅遊天數為【{exact_days}】，請精確規劃此天數的完整每日動線與住宿預算。
 """
 
+        # 針對「不避開人潮」時段的特定提示
+        timing_instruction = f"使用者偏好出發時段為：【{flexible_time}】。"
+        if "不避開人潮" in flexible_time:
+            timing_instruction += "請著重推薦當地「氣候最舒適、景色最漂亮、活動氛圍最熱鬧」的黃金旺季月份，無需刻意避開人潮高峰。"
+
         base_prompt = f"""
 扮演資深親子旅遊顧問，以簡明扼要、高資訊密度的排版，為家庭規劃一趟直飛自由行。
 
@@ -167,12 +174,13 @@ if st.button("🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整�
 - 人數：{adult_count} 大 {child_count} 小（{child_age_label}，長輩：{senior_option}）
 - 住宿要求：{hotel_level}
 - 限制：{'全程推車無障礙動線' if need_stroller else '一般步行'}，{'起飛 09:00-15:00 直飛' if strict_flight_time else '彈性班機'}
+- 出發時段設定：{timing_instruction}
 {days_instruction}
 
 【請直接輸出以下重點結構】
 1. **天數與出發檔期評估**：
    - 說明此目的地最推薦的遊玩天數及原因（若使用者無預設天數）。
-   - 若為近期請鎖定 {f_start.strftime('%Y/%m')}~{f_end.strftime('%Y/%m')}，列出均溫與避開人潮週別。
+   - 根據時段偏好推薦 1~2 個最佳出發月份/週別，並說明均溫、氣候特點與氛圍。
 2. **直飛航班推薦**：適合家庭的航空公司與起降時段。
 3. **住宿推薦**：推薦 2 間推車出入方便的飯店（附 Google 地圖搜尋格式：[飯店名](https://www.google.com/maps/search/?api=1&query=飯店名)）。
 4. **💰 全家總預算表（TWD）**：條列機票、住宿、餐飲、交通、門票與預備金，給出總預算區間。
@@ -239,7 +247,7 @@ if st.session_state.plan_generated:
 
     user_query = st.chat_input("輸入你想微調的景點、天數或問題...")
     if user_query:
-        st.chat_message("user").write(user_query)
+        st.chat_message(user_query).write(user_query)
         st.session_state.chat_history.append({"role": "user", "parts": user_query})
 
         with st.chat_message("assistant"):
