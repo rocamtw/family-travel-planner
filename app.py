@@ -48,12 +48,13 @@ LANG_PACK = {
             "冬季出遊（12~2 月）"
         ],
         "specific_range_label": "請選擇旅遊日期區間（點選出發日與回程日）",
-        "hotel_label": "每晚住宿預算",
-        "hotel_opts": [
-            "中價位商務/家庭型（約 NT$ 3,500 ~ 5,500 /晚）",
-            "親子友善/星級飯店（約 NT$ 5,500 ~ 9,000 /晚）",
-            "平價小資型（約 NT$ 2,500 ~ 3,500 /晚）",
-            "頂級度假村（約 NT$ 9,000 以上 /晚）"
+        "hotel_budget_label": "每晚住宿預算（新台幣 TWD，可手動輸入）",
+        "hotel_style_label": "住宿偏好風格",
+        "hotel_style_opts": [
+            "親子友善 / 近地鐵或車站（電梯推車友善）",
+            "舒適商務型（乾淨平價、生活機能佳）",
+            "渡假村 / 溫泉飯店（休閒設施豐富）",
+            "包棟公寓式飯店（附廚房、洗衣機）"
         ],
         "submit_btn": "🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整行程",
         "download_btn": "📥 下載本次旅行手冊 (.md)",
@@ -107,12 +108,13 @@ LANG_PACK = {
             "Winter trip (Dec ~ Feb)"
         ],
         "specific_range_label": "Select Travel Date Range (Departure & Return)",
-        "hotel_label": "Nightly Accommodation Budget",
-        "hotel_opts": [
-            "Mid-range Business/Family Hotel (~NT$ 3,500 - 5,500 / night)",
-            "Family-friendly / 4-5 Star Hotel (~NT$ 5,500 - 9,000 / night)",
-            "Budget-friendly (~NT$ 2,500 - 3,500 / night)",
-            "Luxury Resort / Onsen Hotel (>NT$ 9,000 / night)"
+        "hotel_budget_label": "Nightly Hotel Budget (TWD, type directly)",
+        "hotel_style_label": "Preferred Accommodation Style",
+        "hotel_style_opts": [
+            "Family-friendly / Near station (Stroller & elevator friendly)",
+            "Comfortable business hotel (Clean, great value, good amenities)",
+            "Resort / Onsen Ryokan (Spacious facilities & dining)",
+            "Aparthotel / Condo (Kitchen & laundry included)"
         ],
         "submit_btn": "🚀 Recommend Best Timing, Estimate Total Budget + Generate Itinerary",
         "download_btn": "📥 Download Travel Handbook (.md)",
@@ -200,7 +202,7 @@ with st.expander(T["members_expander"], expanded=False):
         strict_flight_time = st.checkbox(T["daylight_flight"], value=True)
 
 # ==========================================
-# 區塊 2：行程、天數、時段與預算偏好
+# 區塊 2：行程、天數、時段與手動住宿預算
 # ==========================================
 ORIGIN_OPTIONS = {
     "台北桃園 (TPE) / Taipei Taoyuan": "TPE",
@@ -238,11 +240,21 @@ with col2:
 with col3:
     days_selection = st.selectbox(T["trip_days_label"], options=T["days_opts"], index=0)
 
-col4, col5 = st.columns(2)
+col4, col5, col6 = st.columns(3)
 with col4:
     flexible_time = st.selectbox(T["timing_label"], options=T["timing_opts"], index=0)
 with col5:
-    hotel_level = st.selectbox(T["hotel_label"], options=T["hotel_opts"], index=0)
+    # 住宿預算改為手動輸入數字
+    hotel_budget_per_night = st.number_input(
+        T["hotel_budget_label"],
+        min_value=1000,
+        max_value=100000,
+        value=4500,
+        step=500,
+        help="輸入每晚預計的飯店預算金額"
+    )
+with col6:
+    hotel_style_pref = st.selectbox(T["hotel_style_label"], options=T["hotel_style_opts"], index=0)
 
 # 若選擇「指定具體出發與回程日期區間」，展開雙日期選擇器
 exact_start_date = None
@@ -307,7 +319,7 @@ Language requirement: {lang_instruction}
 - Reference Date: {today.strftime('%Y/%m/%d')}
 - Route: {origin_text} to {dest_text}
 - Travelers: {adult_count} Adults, {child_count} Children ({child_age_label}), Seniors: {senior_option}
-- Hotel Budget: {hotel_level}
+- Accommodation Budget: Strictly around NT$ {hotel_budget_per_night:,} per night. Preferred style: {hotel_style_pref}.
 - Requirements: {'Stroller and barrier-free routes prioritized' if need_stroller else 'Standard walking'}, {'Direct daylight flight (departing 09:00 - 15:00)' if strict_flight_time else 'Flexible flight timing'}
 - Timing & Dates: {timing_instruction}
 {days_instruction}
@@ -318,7 +330,7 @@ Language requirement: {lang_instruction}
    - If AI recommended, explain the optimal duration assessment.
 2. **Direct Flights & Recommended Hotels**:
    - Family-friendly direct airlines and flight schedules suitable for this period.
-   - 2 stroller-accessible hotels with Google Maps links format: [Hotel Name](https://www.google.com/maps/search/?api=1&query=HotelName).
+   - Recommend 2 stroller-accessible hotels matching the budget around NT$ {hotel_budget_per_night:,} / night, with Google Maps links format: [Hotel Name](https://www.google.com/maps/search/?api=1&query=HotelName).
 3. **Daily Family-Friendly Itinerary**:
    - 1 morning attraction, comfortable lunch, afternoon nap/rest break, relaxed evening.
    - If exact date range is given, label each day with specific date & weekday (e.g. Day 1 - 2026/10/06 Tue).
@@ -326,7 +338,7 @@ Language requirement: {lang_instruction}
 4. **💰 Total Estimated Family Budget Table ({adult_count} Adults + {child_count} Children in TWD)**:
    Must provide a clear Markdown table at the very end summarizing:
    | Item | Details | Estimated Amount (TWD) |
-   Include: Direct Flights, Accommodation, Dining, Transportation, Tickets & Activities, Contingency/Shopping, and Total Range.
+   Include: Direct Flights, Accommodation (calculated accurately using NT$ {hotel_budget_per_night:,} * nights), Dining, Transportation, Tickets & Activities, Contingency/Shopping, and Total Range.
 """
 
         ai_client = genai.Client(api_key=gemini_api_key)
