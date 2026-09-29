@@ -149,7 +149,6 @@ if st.button("🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整�
         f_start = today + timedelta(days=30)
         f_end = today + timedelta(days=90)
 
-        # 根據是否手動指定天數動態生成 Prompt 規範
         if "AI" in days_selection:
             days_instruction = f"""
 - 使用者未預設天數，請你根據【{dest_text}】的景點分布與家庭成員（{adult_count} 大 {child_count} 小，包含幼童推車）的體力極限，主動評估並建議「最舒服、不趕場的最佳天數（如建議 X 天 Y 晚）」，並說明推薦此天數的考量原因。接著直接以該建議天數輸出完整行程與預算。
@@ -160,7 +159,6 @@ if st.button("🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整�
 - 使用者已指定旅遊天數為【{exact_days}】，請精確規劃此天數的完整每日動線與住宿預算。
 """
 
-        # 針對「不避開人潮」時段的特定提示
         timing_instruction = f"使用者偏好出發時段為：【{flexible_time}】。"
         if "不避開人潮" in flexible_time:
             timing_instruction += "請著重推薦當地「氣候最舒適、景色最漂亮、活動氛圍最熱鬧」的黃金旺季月份，無需刻意避開人潮高峰。"
@@ -177,14 +175,33 @@ if st.button("🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整�
 - 出發時段設定：{timing_instruction}
 {days_instruction}
 
-【請直接輸出以下重點結構】
-1. **天數與出發檔期評估**：
-   - 說明此目的地最推薦的遊玩天數及原因（若使用者無預設天數）。
-   - 根據時段偏好推薦 1~2 個最佳出發月份/週別，並說明均溫、氣候特點與氛圍。
-2. **直飛航班推薦**：適合家庭的航空公司與起降時段。
-3. **住宿推薦**：推薦 2 間推車出入方便的飯店（附 Google 地圖搜尋格式：[飯店名](https://www.google.com/maps/search/?api=1&query=飯店名)）。
-4. **💰 全家總預算表（TWD）**：條列機票、住宿、餐飲、交通、門票與預備金，給出總預算區間。
-5. **每日精華動線**：每日上午 1 景點、中午後午睡充電、傍晚悠閒散步，景點與餐廳附 Google 地圖超連結 `[導航](https://www.google.com/maps/search/?api=1&query=景點名+{dest_text})`。
+【輸出章節規範】
+請依序輸出以下內容，並**務必在全文最後提供一份結構化預算表格**：
+
+### 一、 天數與出發檔期評估
+- 建議天數考量說明（若由 AI 推薦）。
+- 推薦出發月份/週別，並說明均溫、氣候特點與氛圍。
+
+### 二、 直飛航班與飯店推薦
+- 適合家庭的直飛航空公司與起降時段。
+- 推薦 2 間推車出入方便的飯店（附 Google 地圖搜尋格式：[飯店名](https://www.google.com/maps/search/?api=1&query=飯店名)）。
+
+### 三、 每日精華動線規劃
+- 每日上午 1 景點、中午後午睡充電、傍晚悠閒散步。
+- 景點與餐廳皆附 Google 地圖超連結 `[導航](https://www.google.com/maps/search/?api=1&query=景點名+{dest_text})`。
+
+### 四、 💰 全行程費用試算總表（全家 {adult_count} 大 {child_count} 小 總結算）
+**請務必在文章最後，嚴格使用以下 Markdown 表格格式呈現總預算總結：**
+
+| 預算項目 | 估算說明 / 明細（以天數與人數計） | 預估金額 (新台幣 TWD) |
+| :--- | :--- | :--- |
+| **直飛來回機票** | {adult_count} 大 {child_count} 小 直飛經濟艙 | NT$ XX,XXX ~ XX,XXX |
+| **飯店住宿費用** | 共 X 晚住宿（依【{hotel_level}】估算） | NT$ XX,XXX ~ XX,XXX |
+| **餐飲美食支出** | 每日舒適聚餐與孩童點心 | NT$ XX,XXX ~ XX,XXX |
+| **當地交通支出** | 機場接駁、地鐵票與必要時短程計程車 | NT$ XX,XXX ~ XX,XXX |
+| **門票與活動娛樂** | 景點門票、展覽或體驗項目 | NT$ XX,XXX ~ XX,XXX |
+| **雜支與購物預備金**| 行程彈性備用金、保險與小額採買 | NT$ XX,XXX ~ XX,XXX |
+| **🔥 全家總預算結算** | **全家整趟旅程預估總預算區間** | **NT$ XX,XXX ~ XX,XXX** |
 """
         ai_client = genai.Client(api_key=gemini_api_key)
         st.markdown("---")
@@ -247,7 +264,7 @@ if st.session_state.plan_generated:
 
     user_query = st.chat_input("輸入你想微調的景點、天數或問題...")
     if user_query:
-        st.chat_message(user_query).write(user_query)
+        st.chat_message("user").write(user_query)
         st.session_state.chat_history.append({"role": "user", "parts": user_query})
 
         with st.chat_message("assistant"):
