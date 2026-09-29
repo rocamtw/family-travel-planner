@@ -180,18 +180,8 @@ LANG_PACK = {
 st.set_page_config(page_title="Family Travel Planner", page_icon="✈️", layout="wide")
 
 # ==========================================
-# 管理員後台判斷 (相容新舊版 Streamlit 參數)
+# 語系設定 (側邊欄僅保留語言切換，完全隱藏管理員入口)
 # ==========================================
-ADMIN_PWD = str(st.secrets.get("ADMIN_PWD", "8888"))
-
-# 抓取網址中的 admin 參數
-url_admin = ""
-try:
-    if hasattr(st, "query_params") and "admin" in st.query_params:
-        url_admin = str(st.query_params["admin"])
-except Exception:
-    pass
-
 with st.sidebar:
     st.markdown("### 🌐 語言設定 / Language")
     selected_lang = st.selectbox(
@@ -203,15 +193,23 @@ with st.sidebar:
     lang_key = "zh" if selected_lang == "繁體中文" else "en"
     T = LANG_PACK[lang_key]
 
-    st.markdown("---")
-    st.markdown("🔒 **後台管理通道**")
-    input_pwd = st.text_input("輸入密碼 (預設: 8888)", type="password", value="")
+# ==========================================
+# 秘密網址後台驗證 (無任何前端輸入欄位)
+# 只要網址帶有 ?admin=8888 即刻切換為後台
+# ==========================================
+ADMIN_PWD = str(st.secrets.get("ADMIN_PWD", "8888"))
 
-# 判斷是否為管理員
-is_admin = (input_pwd == ADMIN_PWD) or (url_admin == ADMIN_PWD)
+url_admin = ""
+try:
+    if hasattr(st, "query_params") and "admin" in st.query_params:
+        url_admin = str(st.query_params["admin"])
+except Exception:
+    pass
+
+is_admin = (url_admin == ADMIN_PWD)
 
 # ==========================================
-# 📊 管理員儀表板 (Admin Dashboard View)
+# 📊 管理員儀表板 (僅在網址包含 ?admin=8888 時顯示)
 # ==========================================
 if is_admin:
     st.title("📊 系統監控與使用數據看板 (Admin Dashboard)")
@@ -253,7 +251,7 @@ if is_admin:
         st.info("💡 目前尚無呼叫紀錄。親友在前台產出行程後，數據將即時顯示在此！")
 
     st.markdown("---")
-    st.caption("提示：在側邊欄清空密碼或從網址移除 `?admin=...` 即可返回前台介面。")
+    st.caption("提示：從瀏覽器網址列移除 `?admin=...` 重新整理即可返回前台介面。")
     st.stop()  # 阻斷後續前台畫面載入
 
 # ==========================================
