@@ -39,6 +39,7 @@ LANG_PACK = {
         ],
         "timing_label": "出發時段偏好",
         "timing_opts": [
+            "📅 指定具體出發日期（手動選擇）",
             "近期出發（未來 1~3 個月推薦最舒適月份）",
             "全年度最佳月份（氣候好且避開人潮）",
             "全年度最佳月份（氣候舒適熱鬧，不避開人潮）",
@@ -46,6 +47,7 @@ LANG_PACK = {
             "秋季出遊（9~11 月）",
             "冬季出遊（12~2 月）"
         ],
+        "specific_date_label": "請選擇確切出發日期",
         "hotel_label": "每晚住宿預算",
         "hotel_opts": [
             "中價位商務/家庭型（約 NT$ 3,500 ~ 5,500 /晚）",
@@ -96,6 +98,7 @@ LANG_PACK = {
         ],
         "timing_label": "Departure Timing Preference",
         "timing_opts": [
+            "📅 Specific Departure Date (Select date)",
             "Upcoming trip (Best month in next 1~3 months)",
             "Best month year-round (Pleasant weather & avoid crowds)",
             "Best month year-round (Vibrant & peak season, no crowd avoidance)",
@@ -103,6 +106,7 @@ LANG_PACK = {
             "Autumn trip (Sep ~ Nov)",
             "Winter trip (Dec ~ Feb)"
         ],
+        "specific_date_label": "Select Departure Date",
         "hotel_label": "Nightly Accommodation Budget",
         "hotel_opts": [
             "Mid-range Business/Family Hotel (~NT$ 3,500 - 5,500 / night)",
@@ -196,7 +200,7 @@ with st.expander(T["members_expander"], expanded=False):
         strict_flight_time = st.checkbox(T["daylight_flight"], value=True)
 
 # ==========================================
-# 區塊 2：行程、天數與預算偏好
+# 區塊 2：行程、天數、時段與預算偏好
 # ==========================================
 ORIGIN_OPTIONS = {
     "台北桃園 (TPE) / Taipei Taoyuan": "TPE",
@@ -215,7 +219,7 @@ DEST_OPTIONS = {
     "🇯🇵 日本 - 札幌新千歲 (CTS) / Sapporo Chitose": "札幌 (CTS)",
     "🇰🇷 韓國 - 首爾仁川 (ICN) / Seoul Incheon": "首爾仁川 (ICN)",
     "🇰🇷 韓國 - 釜山金海 (PUS) / Busan": "釜山 (PUS)",
-    "🇸🇬 新加坡 - 樟宜 (SIN) / Singapore Changi": "新加坡 (SIN)",
+    "🇸🇬 新ギュア坡 - 樟宜 (SIN) / Singapore Changi": "新加坡 (SIN)",
     "🇹🇭 泰國 - 曼谷 (BKK) / Bangkok": "曼谷 (BKK)",
     "🇻🇳 越南 - 峴港 (DAD) / Da Nang": "峴港 (DAD)",
     "🌐 其他 / Custom": "CUSTOM"
@@ -240,6 +244,17 @@ with col4:
 with col5:
     hotel_level = st.selectbox(T["hotel_label"], options=T["hotel_opts"], index=0)
 
+# 若選擇「指定具體出發日期」，動態跳出日期選擇框
+selected_exact_date = None
+if "指定" in flexible_time or "Specific" in flexible_time:
+    tomorrow = date.today() + timedelta(days=7)
+    selected_exact_date = st.date_input(
+        f"📅 {T['specific_date_label']}",
+        value=tomorrow,
+        min_value=date.today(),
+        help="選擇你預計起飛出發的第一天"
+    )
+
 # ==========================================
 # 核心執行按鈕
 # ==========================================
@@ -251,7 +266,7 @@ if st.button(T["submit_btn"], type="primary"):
         f_start = today + timedelta(days=30)
         f_end = today + timedelta(days=90)
 
-        # 組合語言與天數規範提示詞
+        # 組合天數規範
         if "AI" in days_selection:
             days_instruction = f"""
 - The user has not preset duration. Suggest the most comfortable duration (e.g. X days Y nights) based on {dest_text} and a family with {adult_count} adults and {child_count} children (stroller-friendly pace). Explain the rationale and generate the complete plan accordingly.
@@ -260,6 +275,15 @@ if st.button(T["submit_btn"], type="primary"):
             days_instruction = f"""
 - The user specified duration: {days_selection}. Plan strictly according to this duration.
 """
+
+        # 組合出發時段規範（含指定日期邏輯）
+        if selected_exact_date:
+            weekday_str = selected_exact_date.strftime("%A")
+            timing_instruction = f"【EXACT DEPARTURE DATE SPECIFIED】: Departure on {selected_exact_date.strftime('%Y-%m-%d')} ({weekday_str}). Please plan the day-by-day itinerary matching exact dates from this starting day."
+        else:
+            timing_instruction = f"Departure preference: {flexible_time}."
+            if "不避開人潮" in flexible_time or "Vibrant" in flexible_time:
+                timing_instruction += " Recommend the peak, lively season with optimal pleasant weather without worrying about crowd levels."
 
         lang_instruction = "Respond entirely in Traditional Chinese (繁體中文)." if lang_key == "zh" else "Respond entirely in fluent English."
 
@@ -273,18 +297,19 @@ Language requirement: {lang_instruction}
 - Travelers: {adult_count} Adults, {child_count} Children ({child_age_label}), Seniors: {senior_option}
 - Hotel Budget: {hotel_level}
 - Requirements: {'Stroller and barrier-free routes prioritized' if need_stroller else 'Standard walking'}, {'Direct daylight flight (departing 09:00 - 15:00)' if strict_flight_time else 'Flexible flight timing'}
-- Timing Preference: {flexible_time}
+- Timing & Dates: {timing_instruction}
 {days_instruction}
 
 [Output Structure Guidelines]
 1. **Duration & Departure Timing Analysis**:
-   - Optimal days assessment if AI recommended.
-   - Recommended departure month/weeks, expected temperature, weather, and crowd considerations.
+   - If exact date is specified, show the exact trip period (e.g. Day 1: YYYY-MM-DD to Day X: YYYY-MM-DD) and expected weather/temperature.
+   - If AI recommended, explain the optimal duration assessment.
 2. **Direct Flights & Recommended Hotels**:
    - Family-friendly direct airlines and flight schedules.
    - 2 stroller-accessible hotels with Google Maps links format: [Hotel Name](https://www.google.com/maps/search/?api=1&query=HotelName).
 3. **Daily Family-Friendly Itinerary**:
    - 1 morning attraction, comfortable lunch, afternoon nap/rest break, relaxed evening.
+   - If exact date is given, label each day with date & weekday (e.g. Day 1 - 2026/10/06 Tue).
    - Each attraction & restaurant with Google Maps navigation link: `[Map](https://www.google.com/maps/search/?api=1&query=SpotName+{dest_text})`.
 4. **💰 Total Estimated Family Budget Table ({adult_count} Adults + {child_count} Children in TWD)**:
    Must provide a clear Markdown table at the very end summarizing:
