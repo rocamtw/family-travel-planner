@@ -1,5 +1,6 @@
 import streamlit as st
 import time
+import random
 from datetime import date, timedelta
 from google import genai
 from google.genai.errors import APIError
@@ -71,8 +72,7 @@ LANG_PACK = {
         "chat_header": "💬 AI 旅行顧問即時對話",
         "chat_placeholder": "輸入你想微調的景點、天數或問題...",
         "ai_thinking": "AI 顧問正在為你調整企劃與試算...",
-        "server_busy": "⚠️ 伺服器忙碌，請稍候再試！",
-        "retrying_notice": "🚦 正在自動優化通道連線，請稍候片刻..."
+        "server_busy": "⚠️ 目前連線人數較多，請稍候 3 秒再點擊一次！"
     },
     "en": {
         "title": "✈️ Family Travel Planner: Flight & Hotel Budget Calculator + AI Itinerary Guide",
@@ -137,8 +137,7 @@ LANG_PACK = {
         "chat_header": "💬 Real-time AI Travel Consultant Chat",
         "chat_placeholder": "Ask questions, adjust attractions, or modify the plan...",
         "ai_thinking": "AI consultant is analyzing and adjusting your itinerary...",
-        "server_busy": "⚠️ Server busy, please retry in a moment!",
-        "retrying_notice": "🚦 Optimizing channel connection, one moment..."
+        "server_busy": "⚠️ High traffic right now, please try clicking again in 3 seconds!"
     }
 }
 
@@ -175,36 +174,46 @@ if "rainy_plan_content" not in st.session_state:
     st.session_state.rainy_plan_content = ""
 
 # ==========================================
-# 智慧重試串流引擎（方案 B：背景自動避震與重試）
+# 非阻塞式並發生成核心（支援手機＋電腦同時請求）
 # ==========================================
-def stream_gemini_with_auto_retry(client, contents_input, max_retries=3):
+def generate_travel_plan_safe(api_key, contents_input, max_retries=3):
     """
-    支援多人同時點擊。遇到 429 頻率限制時，背景以 2s, 4s 自動避震重試，無感流暢輸出。
+    使用非阻塞 API 呼叫，釋放 Python 線程，徹底解決手機與電腦同時點擊卡死問題。
     """
     models = ["gemini-3.5-flash-lite", "gemini-3.8-flash"]
     
     for attempt in range(max_retries):
+        client = genai.Client(api_key=api_key)
         for model_name in models:
             try:
-                response_stream = client.models.generate_content_stream(
+                response = client.models.generate_content(
                     model=model_name,
                     contents=contents_input
                 )
-                for chunk in response_stream:
-                    if chunk.text:
-                        yield chunk.text
-                return  # 成功完整輸出後退出
+                if response.text:
+                    return response.text
             except APIError as e:
-                # 攔截 429 配額超限或 503 暫時忙碌
                 if e.code in [429, 503] or "RESOURCE_EXHAUSTED" in str(e):
-                    time.sleep(2 * (attempt + 1))  # 指數退避延遲 2s, 4s...
+                    time.sleep(1.0 + random.uniform(0.5, 1.2))
                     continue
                 break
             except Exception:
-                time.sleep(1)
+                time.sleep(0.5)
                 continue
                 
-    yield f"\n\n{T['server_busy']}"
+    return None
+
+def stream_text_to_ui(placeholder, text_content):
+    """
+    在 UI 端做絲滑的打字效果，既保證伺服器不卡死，又保留絕佳視覺體驗
+    """
+    words = text_content.split("\n")
+    buffer = ""
+    for line in words:
+        buffer += line + "\n"
+        placeholder.markdown(buffer)
+        time.sleep(0.02)
+    return buffer
 
 # ==========================================
 # 區塊 1：旅遊型態與家庭成員配置
@@ -312,7 +321,7 @@ if "指定" in flexible_time or "Specific" in flexible_time:
         st.info(f"🗓️ 已選定行程：**{exact_start_date.strftime('%Y-%m-%d')}** 至 **{exact_end_date.strftime('%Y-%m-%d')}**（共 **{calculated_days} 天 {calculated_days - 1} 晚**）")
 
 # ==========================================
-# 核心執行按鈕（自由並發，無鎖暢通體驗）
+# 核心執行按鈕
 # ==========================================
 if st.button(T["submit_btn"], type="primary"):
     if not gemini_api_key:
@@ -322,7 +331,6 @@ if st.button(T["submit_btn"], type="primary"):
     else:
         today = date.today()
 
-        # 天數與日期動態邏輯
         if exact_start_date and exact_end_date:
             days_instruction = f"""
 - 【EXACT TRAVEL DATES LOCKED】:
@@ -390,20 +398,23 @@ Language requirement: {lang_instruction}
    Must provide a clear Markdown table at the very end summarizing:
    | Item | Details | Estimated Amount (TWD) |
 """
-        ai_client = genai.Client(api_key=gemini_api_key)
         st.markdown("---")
         plan_box = st.empty()
         
-        # 自由並發串流輸出
-        full_text = plan_box.write_stream(stream_gemini_with_auto_retry(ai_client, base_prompt))
+        with st.spinner(T["ai_thinking"]):
+            result_text = generate_travel_plan_safe(gemini_api_key, base_prompt)
 
-        st.session_state.base_plan_content = full_text
-        st.session_state.plan_generated = True
-        st.session_state.rainy_plan_content = ""
-        st.session_state.chat_history = [
-            {"role": "user", "parts": base_prompt},
-            {"role": "model", "parts": full_text}
-        ]
+        if result_text:
+            full_text = stream_text_to_ui(plan_box, result_text)
+            st.session_state.base_plan_content = full_text
+            st.session_state.plan_generated = True
+            st.session_state.rainy_plan_content = ""
+            st.session_state.chat_history = [
+                {"role": "user", "parts": base_prompt},
+                {"role": "model", "parts": full_text}
+            ]
+        else:
+            plan_box.error(T["server_busy"])
 
 # ==========================================
 # 輔助功能區塊
@@ -420,12 +431,16 @@ if st.session_state.plan_generated:
     # 雨天室內備案按鈕
     st.subheader(T["rainy_header"])
     if st.button(T["rainy_btn"], type="secondary"):
-        ai_client = genai.Client(api_key=gemini_api_key)
         rain_lang_inst = "Respond in Traditional Chinese." if lang_key == "zh" else "Respond in English."
         rain_prompt = f"Replace the previous itinerary for {dest_text} with 100% indoor family-friendly alternatives (aquariums, shopping malls, science centers, stroller-accessible). Include Google Maps links. {rain_lang_inst}"
         rain_box = st.empty()
-        rain_text = rain_box.write_stream(stream_gemini_with_auto_retry(ai_client, rain_prompt))
-        st.session_state.rainy_plan_content = rain_text
+        with st.spinner(T["ai_thinking"]):
+            rain_result = generate_travel_plan_safe(gemini_api_key, rain_prompt)
+        if rain_result:
+            rain_text = stream_text_to_ui(rain_box, rain_result)
+            st.session_state.rainy_plan_content = rain_text
+        else:
+            rain_box.error(T["server_busy"])
 
     # 行前清單
     with st.expander(T["packing_expander"], expanded=False):
@@ -475,7 +490,12 @@ if st.session_state.plan_generated:
         st.session_state.chat_history.append({"role": "user", "parts": user_query})
 
         with st.chat_message("assistant"):
-            ai_client = genai.Client(api_key=gemini_api_key)
+            chat_box = st.empty()
             formatted = [{"role": h["role"], "parts": [{"text": h["parts"]}]} for h in st.session_state.chat_history]
-            chat_reply = st.write_stream(stream_gemini_with_auto_retry(ai_client, formatted))
-            st.session_state.chat_history.append({"role": "model", "parts": chat_reply})
+            with st.spinner("..."):
+                chat_res = generate_travel_plan_safe(gemini_api_key, formatted)
+            if chat_res:
+                chat_reply = stream_text_to_ui(chat_box, chat_res)
+                st.session_state.chat_history.append({"role": "model", "parts": chat_reply})
+            else:
+                chat_box.error(T["server_busy"])
