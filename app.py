@@ -10,6 +10,11 @@ LANG_PACK = {
         "title": "✈️ 家庭專屬 最佳機票、住宿預算試算 ＋ AI 對話行程智囊",
         "missing_key": "⚠️ 系統尚未在 Streamlit Secrets 偵測到 GEMINI_KEY，請至後台 Settings -> Secrets 完成設定。",
         "members_expander": "👨‍👩‍👧‍👦 成員配置與體力需求（點此展開修改）",
+        "travel_style_label": "旅遊型態偏好",
+        "travel_style_opts": [
+            "🎒 自由行（彈性自主、深入漫遊、推車/地鐵/計程車接駁）",
+            "🚌 團體旅遊 / 包車客製團（專車接送免走累、全程領隊導遊、行李直達）"
+        ],
         "adults": "成人人數",
         "children": "小孩人數",
         "child_age": "小孩年齡分佈",
@@ -70,6 +75,11 @@ LANG_PACK = {
         "title": "✈️ Family Travel Planner: Flight & Hotel Budget Calculator + AI Itinerary Guide",
         "missing_key": "⚠️ GEMINI_KEY not found in Streamlit Secrets. Please configure it under Settings -> Secrets.",
         "members_expander": "👨‍👩‍👧‍👦 Family Members & Physical Needs (Click to edit)",
+        "travel_style_label": "Travel Style Preference",
+        "travel_style_opts": [
+            "🎒 Free & Easy / Independent Travel (Flexible, stroller/metro/taxi friendly)",
+            "🚌 Guided Group Tour / Private Chartered Tour (Coach transfer, tour guide, hassle-free luggage)"
+        ],
         "adults": "Adults",
         "children": "Children",
         "child_age": "Children Age Distribution",
@@ -178,8 +188,16 @@ def stream_gemini_fast(client, contents_input):
     yield f"\n\n{T['server_busy']}"
 
 # ==========================================
-# 區塊 1：家庭成員配置
+# 區塊 1：旅遊型態與家庭成員配置
 # ==========================================
+travel_style_selection = st.radio(
+    f"🧭 **{T['travel_style_label']}**",
+    options=T["travel_style_opts"],
+    index=0,
+    horizontal=True
+)
+is_group_tour = "團體" in travel_style_selection or "Guided" in travel_style_selection
+
 with st.expander(T["members_expander"], expanded=False):
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
     with col_m1:
@@ -202,7 +220,7 @@ with st.expander(T["members_expander"], expanded=False):
         strict_flight_time = st.checkbox(T["daylight_flight"], value=True)
 
 # ==========================================
-# 區塊 2：行程、天數、時段與手動住宿預算
+# 區塊 2：行程、天數、時段與預算偏好
 # ==========================================
 ORIGIN_OPTIONS = {
     "台北桃園 (TPE) / Taipei Taoyuan": "TPE",
@@ -244,7 +262,6 @@ col4, col5, col6 = st.columns(3)
 with col4:
     flexible_time = st.selectbox(T["timing_label"], options=T["timing_opts"], index=0)
 with col5:
-    # 住宿預算改為手動輸入數字
     hotel_budget_per_night = st.number_input(
         T["hotel_budget_label"],
         min_value=1000,
@@ -263,7 +280,7 @@ calculated_days = None
 
 if "指定" in flexible_time or "Specific" in flexible_time:
     default_start = date.today() + timedelta(days=14)
-    default_end = default_start + timedelta(days=4)  # 預設 5 天 4 晚
+    default_end = default_start + timedelta(days=4)
     date_range = st.date_input(
         f"📅 {T['specific_range_label']}",
         value=(default_start, default_end),
@@ -309,14 +326,30 @@ if st.button(T["submit_btn"], type="primary"):
             if "不避開人潮" in flexible_time or "Vibrant" in flexible_time:
                 timing_instruction += " Recommend the peak, lively season with optimal pleasant weather without worrying about crowd levels."
 
+        # 自由行 vs 團體旅遊的差異化指令
+        if is_group_tour:
+            style_instruction = """
+- 【TRAVEL MODE: GUIDED GROUP TOUR / PRIVATE CHARTER TOUR (團體旅遊 / 包車客製團)】
+  - 規劃重點：強調專用遊覽巴士直達接送、免拉大件行李趕電車、全程導遊兼領隊照應、適合幼童與長輩體力的合菜聚餐、減少純步行拉車距離。
+  - 預算表調整：將機票、住宿、餐飲、專用巴士包車與司導服務費整合為「團費/包車團總估價」或列出「每人平均團費估算 + 導遊司機小費 + 自由活動零用金」。
+"""
+        else:
+            style_instruction = """
+- 【TRAVEL MODE: FREE & EASY / INDEPENDENT TRAVEL (自由行)】
+  - 規劃重點：彈性自主動線、捷運/地鐵平緩電梯動線、點對點時短程計程車搭配、推車友善餐廳、保留下午 13:30 - 15:30 午睡或回飯店充電時間。
+  - 預算表調整：分項列出直飛機票、飯店住宿、當地大眾交通/計程車、餐飲、門票雜支及總預算區間。
+"""
+
         lang_instruction = "Respond entirely in Traditional Chinese (繁體中文)." if lang_key == "zh" else "Respond entirely in fluent English."
 
         base_prompt = f"""
-You are a senior family travel consultant. Provide a comprehensive direct-flight itinerary and budget breakdown.
+You are a senior family travel consultant. Provide a comprehensive itinerary and budget breakdown.
 Language requirement: {lang_instruction}
 
 [Profile & Constraints]
 - Reference Date: {today.strftime('%Y/%m/%d')}
+- Travel Mode: {'團體旅遊 / 包車客製團 (Guided / Private Tour)' if is_group_tour else '自由行 (Free & Easy)'}
+{style_instruction}
 - Route: {origin_text} to {dest_text}
 - Travelers: {adult_count} Adults, {child_count} Children ({child_age_label}), Seniors: {senior_option}
 - Accommodation Budget: Strictly around NT$ {hotel_budget_per_night:,} per night. Preferred style: {hotel_style_pref}.
@@ -332,13 +365,15 @@ Language requirement: {lang_instruction}
    - Family-friendly direct airlines and flight schedules suitable for this period.
    - Recommend 2 stroller-accessible hotels matching the budget around NT$ {hotel_budget_per_night:,} / night, with Google Maps links format: [Hotel Name](https://www.google.com/maps/search/?api=1&query=HotelName).
 3. **Daily Family-Friendly Itinerary**:
-   - 1 morning attraction, comfortable lunch, afternoon nap/rest break, relaxed evening.
+   - Morning attraction, comfortable lunch, afternoon nap/rest break, relaxed evening.
+   - Emphasize coach / easy transfer features if Group Tour; emphasize elevator/metro tips if Free & Easy.
    - If exact date range is given, label each day with specific date & weekday (e.g. Day 1 - 2026/10/06 Tue).
    - Each attraction & restaurant with Google Maps navigation link: `[Map](https://www.google.com/maps/search/?api=1&query=SpotName+{dest_text})`.
 4. **💰 Total Estimated Family Budget Table ({adult_count} Adults + {child_count} Children in TWD)**:
    Must provide a clear Markdown table at the very end summarizing:
    | Item | Details | Estimated Amount (TWD) |
-   Include: Direct Flights, Accommodation (calculated accurately using NT$ {hotel_budget_per_night:,} * nights), Dining, Transportation, Tickets & Activities, Contingency/Shopping, and Total Range.
+   If Group Tour: include estimated tour package rate/private charter cost, meals, guide tips, personal shopping.
+   If Free & Easy: include direct flights, hotel, dining, local transport/taxis, tickets, contingency.
 """
 
         ai_client = genai.Client(api_key=gemini_api_key)
