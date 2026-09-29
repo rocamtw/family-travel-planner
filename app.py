@@ -177,21 +177,7 @@ LANG_PACK = {
     }
 }
 
-st.set_page_config(page_title="Family Travel Planner", page_icon="✈️", layout="wide")
-
-# ==========================================
-# 語系設定 (側邊欄僅保留語言切換，完全隱藏管理員入口)
-# ==========================================
-with st.sidebar:
-    st.markdown("### 🌐 語言設定 / Language")
-    selected_lang = st.selectbox(
-        "選擇語言",
-        options=["繁體中文", "English"],
-        index=0,
-        label_visibility="collapsed"
-    )
-    lang_key = "zh" if selected_lang == "繁體中文" else "en"
-    T = LANG_PACK[lang_key]
+st.set_page_config(page_title="Family Travel Planner", page_icon="✈️", layout="wide", initial_sidebar_state="collapsed")
 
 # ==========================================
 # 秘密網址後台驗證 (無任何前端輸入欄位)
@@ -255,9 +241,21 @@ if is_admin:
     st.stop()  # 阻斷後續前台畫面載入
 
 # ==========================================
-# 一般使用者前台介面 (Public UI)
+# 前台頂部：標題 ＋ 下拉式語言選單 (並排顯示)
 # ==========================================
-st.title(T["title"])
+col_header, col_lang_select = st.columns([5, 1])
+
+with col_lang_select:
+    selected_lang = st.selectbox(
+        "🌐 Language",
+        options=["繁體中文", "English"],
+        index=0
+    )
+    lang_key = "zh" if selected_lang == "繁體中文" else "en"
+    T = LANG_PACK[lang_key]
+
+with col_header:
+    st.title(T["title"])
 
 gemini_api_key = st.secrets.get("GEMINI_KEY", "")
 if not gemini_api_key:
