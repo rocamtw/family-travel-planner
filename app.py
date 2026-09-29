@@ -106,7 +106,7 @@ with col1:
 with col2:
     dest_label = st.selectbox("目的地城市 / 機場", options=list(DEST_OPTIONS.keys()), index=0)
     if DEST_OPTIONS[dest_label] == "CUSTOM":
-        dest_text = st.text_input("請輸入城市或機場名稱", value="沖繩")
+        dest_text = st.text_input("請輸入城市或機場名稱", value="")
     else:
         dest_text = DEST_OPTIONS[dest_label]
 with col3:
