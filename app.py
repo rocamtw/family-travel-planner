@@ -1,9 +1,45 @@
 import streamlit as st
 import time
 import random
-from datetime import date, timedelta
+import pandas as pd
+from datetime import date, timedelta, datetime
 from google import genai
+from google.genai import types
 from google.genai.errors import APIError
+
+# ==========================================
+# 伺服器全域監控記錄庫 (Global Monitor State)
+# ==========================================
+class GlobalMonitor:
+    def __init__(self):
+        self.logs = []
+
+    def record_log(self, dest, days, style, duration_sec, status):
+        log_entry = {
+            "時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "目的地": dest,
+            "旅遊天數": str(days),
+            "旅遊型態": "自由行" if "自由" in style or "Free" in style else "跟團/包車",
+            "耗時(秒)": round(duration_sec, 2),
+            "狀態": status
+        }
+        self.logs.insert(0, log_entry)
+        if len(self.logs) > 200:
+            self.logs.pop()
+
+    def get_logs_df(self):
+        if not self.logs:
+            return pd.DataFrame()
+        return pd.DataFrame(self.logs)
+
+    def clear_logs(self):
+        self.logs.clear()
+
+@st.cache_resource
+def get_monitor():
+    return GlobalMonitor()
+
+monitor = get_monitor()
 
 # ==========================================
 # 語系字典配置 (i18n Translation Dictionary)
@@ -144,26 +180,91 @@ LANG_PACK = {
 st.set_page_config(page_title="Family Travel Planner", page_icon="✈️", layout="wide")
 
 # ==========================================
-# 語系切換器
+# 管理員後台判斷 (相容新舊版 Streamlit 參數)
 # ==========================================
-col_title, col_lang = st.columns([5, 1])
-with col_lang:
-    selected_lang = st.selectbox(
-        "🌐 Language / 語言",
-        options=["繁體中文", "English"],
-        index=0
-    )
-lang_key = "zh" if selected_lang == "繁體中文" else "en"
-T = LANG_PACK[lang_key]
+ADMIN_PWD = str(st.secrets.get("ADMIN_PWD", "8888"))
 
-with col_title:
-    st.title(T["title"])
+# 抓取網址中的 admin 參數
+url_admin = ""
+try:
+    if hasattr(st, "query_params") and "admin" in st.query_params:
+        url_admin = str(st.query_params["admin"])
+except Exception:
+    pass
+
+with st.sidebar:
+    st.markdown("### 🌐 語言設定 / Language")
+    selected_lang = st.selectbox(
+        "選擇語言",
+        options=["繁體中文", "English"],
+        index=0,
+        label_visibility="collapsed"
+    )
+    lang_key = "zh" if selected_lang == "繁體中文" else "en"
+    T = LANG_PACK[lang_key]
+
+    st.markdown("---")
+    st.markdown("🔒 **後台管理通道**")
+    input_pwd = st.text_input("輸入密碼 (預設: 8888)", type="password", value="")
+
+# 判斷是否為管理員
+is_admin = (input_pwd == ADMIN_PWD) or (url_admin == ADMIN_PWD)
+
+# ==========================================
+# 📊 管理員儀表板 (Admin Dashboard View)
+# ==========================================
+if is_admin:
+    st.title("📊 系統監控與使用數據看板 (Admin Dashboard)")
+    st.caption("即時匯總所有使用者的調用日誌、熱門目的地與效能指標。")
+
+    df_logs = monitor.get_logs_df()
+
+    if not df_logs.empty:
+        col1, col2, col3, col4 = st.columns(4)
+        total_runs = len(df_logs)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_runs = len(df_logs[df_logs["時間"].str.startswith(today_str)])
+        avg_duration = df_logs["耗時(秒)"].mean()
+        success_rate = (len(df_logs[df_logs["狀態"] == "成功"]) / total_runs) * 100
+
+        col1.metric("累計請求總次數", f"{total_runs} 次")
+        col2.metric("今日生成次數", f"{today_runs} 次")
+        col3.metric("平均生成耗時", f"{avg_duration:.2f} 秒")
+        col4.metric("請求成功率", f"{success_rate:.1f} %")
+
+        st.markdown("---")
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            st.subheader("📍 最常查詢目的地排行")
+            st.bar_chart(df_logs["目的地"].value_counts())
+
+        with col_c2:
+            st.subheader("🧭 旅遊型態分佈")
+            st.bar_chart(df_logs["旅遊型態"].value_counts())
+
+        st.markdown("---")
+        st.subheader("📋 即時調用日誌 (Recent Logs - 最新在最上方)")
+        st.dataframe(df_logs, use_container_width=True)
+
+        if st.button("🗑️ 清空所有統計日誌", type="secondary"):
+            monitor.clear_logs()
+            st.rerun()
+    else:
+        st.info("💡 目前尚無呼叫紀錄。親友在前台產出行程後，數據將即時顯示在此！")
+
+    st.markdown("---")
+    st.caption("提示：在側邊欄清空密碼或從網址移除 `?admin=...` 即可返回前台介面。")
+    st.stop()  # 阻斷後續前台畫面載入
+
+# ==========================================
+# 一般使用者前台介面 (Public UI)
+# ==========================================
+st.title(T["title"])
 
 gemini_api_key = st.secrets.get("GEMINI_KEY", "")
 if not gemini_api_key:
     st.warning(T["missing_key"])
 
-# 狀態初始化
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "plan_generated" not in st.session_state:
@@ -173,22 +274,21 @@ if "base_plan_content" not in st.session_state:
 if "rainy_plan_content" not in st.session_state:
     st.session_state.rainy_plan_content = ""
 
-# ==========================================
-# 非阻塞式並發生成核心（支援手機＋電腦同時請求）
-# ==========================================
+# 非阻塞式生成核心
 def generate_travel_plan_safe(api_key, contents_input, max_retries=3):
-    """
-    使用非阻塞 API 呼叫，釋放 Python 線程，徹底解決手機與電腦同時點擊卡死問題。
-    """
     models = ["gemini-3.5-flash-lite", "gemini-3.8-flash"]
-    
+    config = types.GenerateContentConfig(
+        temperature=0.2,
+        seed=42
+    )
     for attempt in range(max_retries):
         client = genai.Client(api_key=api_key)
         for model_name in models:
             try:
                 response = client.models.generate_content(
                     model=model_name,
-                    contents=contents_input
+                    contents=contents_input,
+                    config=config
                 )
                 if response.text:
                     return response.text
@@ -200,13 +300,9 @@ def generate_travel_plan_safe(api_key, contents_input, max_retries=3):
             except Exception:
                 time.sleep(0.5)
                 continue
-                
     return None
 
 def stream_text_to_ui(placeholder, text_content):
-    """
-    在 UI 端做絲滑的打字效果，既保證伺服器不卡死，又保留絕佳視覺體驗
-    """
     words = text_content.split("\n")
     buffer = ""
     for line in words:
@@ -215,9 +311,7 @@ def stream_text_to_ui(placeholder, text_content):
         time.sleep(0.02)
     return buffer
 
-# ==========================================
 # 區塊 1：旅遊型態與家庭成員配置
-# ==========================================
 travel_style_selection = st.radio(
     f"🧭 **{T['travel_style_label']}**",
     options=T["travel_style_opts"],
@@ -247,9 +341,7 @@ with st.expander(T["members_expander"], expanded=False):
     with col_req2:
         strict_flight_time = st.checkbox(T["daylight_flight"], value=True)
 
-# ==========================================
 # 區塊 2：行程、天數、時段與預算偏好
-# ==========================================
 ORIGIN_OPTIONS = {
     "台北桃園 (TPE) / Taipei Taoyuan": "TPE",
     "台北松山 (TSA) / Taipei Songshan": "TSA",
@@ -301,7 +393,6 @@ with col5:
 with col6:
     hotel_style_pref = st.selectbox(T["hotel_style_label"], options=T["hotel_style_opts"], index=0)
 
-# 若選擇「指定具體出發與回程日期區間」，展開雙日期選擇器
 exact_start_date = None
 exact_end_date = None
 calculated_days = None
@@ -320,9 +411,7 @@ if "指定" in flexible_time or "Specific" in flexible_time:
         calculated_days = (exact_end_date - exact_start_date).days + 1
         st.info(f"🗓️ 已選定行程：**{exact_start_date.strftime('%Y-%m-%d')}** 至 **{exact_end_date.strftime('%Y-%m-%d')}**（共 **{calculated_days} 天 {calculated_days - 1} 晚**）")
 
-# ==========================================
 # 核心執行按鈕
-# ==========================================
 if st.button(T["submit_btn"], type="primary"):
     if not gemini_api_key:
         st.error(T["missing_key"])
@@ -340,6 +429,7 @@ if st.button(T["submit_btn"], type="primary"):
   - Please arrange the day-by-day plan mapping strictly to these exact calendar dates.
 """
             timing_instruction = f"Travel strictly across {exact_start_date.strftime('%Y-%m-%d')} to {exact_end_date.strftime('%Y-%m-%d')}."
+            logged_days = f"{calculated_days} 天"
         else:
             if "AI" in days_selection:
                 days_instruction = f"""
@@ -352,6 +442,7 @@ if st.button(T["submit_btn"], type="primary"):
             timing_instruction = f"Departure preference: {flexible_time}."
             if "不避開人潮" in flexible_time or "Vibrant" in flexible_time:
                 timing_instruction += " Recommend the peak, lively season with optimal pleasant weather without worrying about crowd levels."
+            logged_days = days_selection
 
         if is_group_tour:
             style_instruction = """
@@ -400,9 +491,15 @@ Language requirement: {lang_instruction}
 """
         st.markdown("---")
         plan_box = st.empty()
-        
+
+        start_time = time.time()
         with st.spinner(T["ai_thinking"]):
             result_text = generate_travel_plan_safe(gemini_api_key, base_prompt)
+        elapsed_time = time.time() - start_time
+
+        # 記錄至全域後台監控庫
+        status_label = "成功" if result_text else "失敗/忙碌"
+        monitor.record_log(dest_text, logged_days, travel_style_selection, elapsed_time, status_label)
 
         if result_text:
             full_text = stream_text_to_ui(plan_box, result_text)
@@ -416,9 +513,7 @@ Language requirement: {lang_instruction}
         else:
             plan_box.error(T["server_busy"])
 
-# ==========================================
 # 輔助功能區塊
-# ==========================================
 if st.session_state.plan_generated:
     st.markdown("---")
     st.download_button(
@@ -428,7 +523,6 @@ if st.session_state.plan_generated:
         mime="text/markdown"
     )
 
-    # 雨天室內備案按鈕
     st.subheader(T["rainy_header"])
     if st.button(T["rainy_btn"], type="secondary"):
         rain_lang_inst = "Respond in Traditional Chinese." if lang_key == "zh" else "Respond in English."
@@ -442,7 +536,6 @@ if st.session_state.plan_generated:
         else:
             rain_box.error(T["server_busy"])
 
-    # 行前清單
     with st.expander(T["packing_expander"], expanded=False):
         c1, c2, c3 = st.columns(3)
         if lang_key == "zh":
@@ -478,7 +571,6 @@ if st.session_state.plan_generated:
                 st.checkbox("Baby purees/snacks & water bottle", value=False)
                 st.checkbox("Diapers (Trip Days × 5 pcs)", value=False)
 
-    # 延伸對話
     st.markdown("---")
     st.subheader(T["chat_header"])
     for msg in st.session_state.chat_history[2:]:
