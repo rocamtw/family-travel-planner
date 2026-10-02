@@ -88,6 +88,7 @@ LANG_PACK = {
             "全年度最佳月份（氣候好且避開人潮）",
             "全年度最佳月份（氣候舒適熱鬧，不避開人潮）",
             "春季出遊（3~5 月）",
+            "夏季出遊（6~8 月）",
             "秋季出遊（9~11 月）",
             "冬季出遊（12~2 月）"
         ],
@@ -153,6 +154,7 @@ LANG_PACK = {
             "Best month year-round (Pleasant weather & avoid crowds)",
             "Best month year-round (Vibrant & peak season, no crowd avoidance)",
             "Spring trip (Mar ~ May)",
+            "Summer trip (Jun ~ Aug)",
             "Autumn trip (Sep ~ Nov)",
             "Winter trip (Dec ~ Feb)"
         ],
@@ -180,26 +182,40 @@ LANG_PACK = {
 st.set_page_config(page_title="Family Travel Planner", page_icon="✈️", layout="wide", initial_sidebar_state="collapsed")
 
 # ==========================================
-# 秘密網址後台驗證 (無任何前端輸入欄位)
-# 只要網址帶有 ?admin=8888 即刻切換為後台
+# 狀態初始化
 # ==========================================
+if "is_admin_logged_in" not in st.session_state:
+    st.session_state.is_admin_logged_in = False
+if "egg_clicks" not in st.session_state:
+    st.session_state.egg_clicks = 0
+
 ADMIN_PWD = str(st.secrets.get("ADMIN_PWD", "8888"))
 
-url_admin = ""
+# 檢查網址是否有 admin 參數 (電腦快速進入通道)
 try:
     if hasattr(st, "query_params") and "admin" in st.query_params:
-        url_admin = str(st.query_params["admin"])
+        if str(st.query_params["admin"]) == ADMIN_PWD:
+            st.session_state.is_admin_logged_in = True
 except Exception:
     pass
 
-is_admin = (url_admin == ADMIN_PWD)
-
 # ==========================================
-# 📊 管理員儀表板 (僅在網址包含 ?admin=8888 時顯示)
+# 📊 管理員儀表板
 # ==========================================
-if is_admin:
-    st.title("📊 系統監控與使用數據看板 (Admin Dashboard)")
-    st.caption("即時匯總所有使用者的調用日誌、熱門目的地與效能指標。")
+if st.session_state.is_admin_logged_in:
+    col_adm_head, col_adm_btn = st.columns([5, 1])
+    with col_adm_head:
+        st.title("📊 系統監控與使用數據看板")
+        st.caption("即時匯總所有使用者的調用日誌、熱門目的地與效能指標。")
+    with col_adm_btn:
+        if st.button("🚪 登出後台"):
+            st.session_state.is_admin_logged_in = False
+            try:
+                if "admin" in st.query_params:
+                    del st.query_params["admin"]
+            except Exception:
+                pass
+            st.rerun()
 
     df_logs = monitor.get_logs_df()
 
@@ -236,12 +252,10 @@ if is_admin:
     else:
         st.info("💡 目前尚無呼叫紀錄。親友在前台產出行程後，數據將即時顯示在此！")
 
-    st.markdown("---")
-    st.caption("提示：從瀏覽器網址列移除 `?admin=...` 重新整理即可返回前台介面。")
-    st.stop()  # 阻斷後續前台畫面載入
+    st.stop()  # 阻斷前台畫面載入
 
 # ==========================================
-# 前台頂部：標題 ＋ 下拉式語言選單 (並排顯示)
+# 前台頂部：標題 ＋ 下拉式語言選單
 # ==========================================
 col_header, col_lang_select = st.columns([5, 1])
 
@@ -587,3 +601,27 @@ if st.session_state.plan_generated:
                 st.session_state.chat_history.append({"role": "model", "parts": chat_reply})
             else:
                 chat_box.error(T["server_busy"])
+
+# ==========================================
+# 頁面最底部：手機專用「暗門彩蛋」
+# ==========================================
+st.markdown("---")
+col_foot, col_egg = st.columns([10, 1])
+with col_foot:
+    st.caption("© 2026 Family Travel Planner | Stroller & Child-Friendly Travel Assistant")
+with col_egg:
+    if st.button("✈️", key="secret_egg_btn", help=""):
+        st.session_state.egg_clicks += 1
+
+if st.session_state.egg_clicks >= 3:
+    st.markdown("---")
+    with st.container():
+        st.info("🔐 **管理員暗門已喚醒**")
+        egg_pw = st.text_input("請輸入密碼解鎖後台", type="password", key="egg_input_pw")
+        if st.button("驗證進入"):
+            if egg_pw == ADMIN_PWD:
+                st.session_state.is_admin_logged_in = True
+                st.session_state.egg_clicks = 0
+                st.rerun()
+            else:
+                st.error("密碼錯誤！")
