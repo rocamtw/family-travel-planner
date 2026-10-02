@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 import random
+import urllib.parse
 import pandas as pd
 from datetime import date, timedelta, datetime
 from google import genai
@@ -48,7 +49,7 @@ LANG_PACK = {
     "zh": {
         "title": "✈️ 家庭專屬 最佳機票、住宿預算試算 ＋ AI 對話行程智囊",
         "missing_key": "⚠️ 系統尚未在 Streamlit Secrets 偵測到 GEMINI_KEY，請至後台 Settings -> Secrets 完成設定。",
-        "members_expander": "👨‍👩‍👧‍👦 成員配置與體力需求（點此展開修改）",
+        "members_expander": "👨‍👩‍👧‍‍👦 成員配置與體力需求（點此展開修改）",
         "travel_style_label": "旅遊型態偏好",
         "travel_style_opts": [
             "🎒 自由行（彈性自主、深入漫遊、推車/地鐵/計程車接駁）",
@@ -102,7 +103,11 @@ LANG_PACK = {
             "包棟公寓式飯店（附廚房、洗衣機）"
         ],
         "submit_btn": "🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整行程",
-        "download_btn": "📥 下載本次旅行手冊 (.md)",
+        "download_btn": "📥 下載完整手冊 (.md)",
+        "share_header": "📤 分享與導出行程給親友",
+        "copy_share_btn": "📋 複製精簡行程摘要（可直接貼入 LINE / 記事本）",
+        "line_share_btn": "💬 一鍵分享至 LINE",
+        "copied_success": "✅ 已成功複製到剪貼簿！可直接貼給家人查看。",
         "rainy_header": "☔ 氣候應變：室內親子備案",
         "rainy_btn": "🔄 一鍵切換全室內備案",
         "packing_expander": "🎒 行前打包清單（互動確認）",
@@ -169,6 +174,10 @@ LANG_PACK = {
         ],
         "submit_btn": "🚀 Recommend Best Timing, Estimate Total Budget + Generate Itinerary",
         "download_btn": "📥 Download Travel Handbook (.md)",
+        "share_header": "📤 Share Itinerary with Family & Friends",
+        "copy_share_btn": "📋 Copy Itinerary Summary (Ready for LINE / Notes)",
+        "line_share_btn": "💬 Share to LINE",
+        "copied_success": "✅ Copied to clipboard! Ready to paste into family chat.",
         "rainy_header": "☔ Weather Backup: Indoor Family-friendly Itinerary",
         "rainy_btn": "🔄 Switch to 100% Indoor Rainy-day Backup",
         "packing_expander": "🎒 Pre-trip Packing Checklist (Interactive)",
@@ -191,7 +200,6 @@ if "egg_clicks" not in st.session_state:
 
 ADMIN_PWD = str(st.secrets.get("ADMIN_PWD", "8888"))
 
-# 檢查網址是否有 admin 參數 (電腦快速進入通道)
 try:
     if hasattr(st, "query_params") and "admin" in st.query_params:
         if str(st.query_params["admin"]) == ADMIN_PWD:
@@ -252,7 +260,7 @@ if st.session_state.is_admin_logged_in:
     else:
         st.info("💡 目前尚無呼叫紀錄。親友在前台產出行程後，數據將即時顯示在此！")
 
-    st.stop()  # 阻斷前台畫面載入
+    st.stop()
 
 # ==========================================
 # 前台頂部：標題 ＋ 下拉式語言選單
@@ -283,6 +291,10 @@ if "base_plan_content" not in st.session_state:
     st.session_state.base_plan_content = ""
 if "rainy_plan_content" not in st.session_state:
     st.session_state.rainy_plan_content = ""
+if "last_dest" not in st.session_state:
+    st.session_state.last_dest = ""
+if "last_days" not in st.session_state:
+    st.session_state.last_days = ""
 
 # 非阻塞式生成核心
 def generate_travel_plan_safe(api_key, contents_input, max_retries=3):
@@ -507,7 +519,6 @@ Language requirement: {lang_instruction}
             result_text = generate_travel_plan_safe(gemini_api_key, base_prompt)
         elapsed_time = time.time() - start_time
 
-        # 記錄至全域後台監控庫
         status_label = "成功" if result_text else "失敗/忙碌"
         monitor.record_log(dest_text, logged_days, travel_style_selection, elapsed_time, status_label)
 
@@ -516,6 +527,8 @@ Language requirement: {lang_instruction}
             st.session_state.base_plan_content = full_text
             st.session_state.plan_generated = True
             st.session_state.rainy_plan_content = ""
+            st.session_state.last_dest = dest_text
+            st.session_state.last_days = logged_days
             st.session_state.chat_history = [
                 {"role": "user", "parts": base_prompt},
                 {"role": "model", "parts": full_text}
@@ -523,16 +536,53 @@ Language requirement: {lang_instruction}
         else:
             plan_box.error(T["server_busy"])
 
-# 輔助功能區塊
+# ==========================================
+# 輔助功能區塊（下載 ＋ 分享按鈕）
+# ==========================================
 if st.session_state.plan_generated:
     st.markdown("---")
-    st.download_button(
-        label=T["download_btn"],
-        data=st.session_state.base_plan_content,
-        file_name=f"{dest_text}_Travel_Plan.md",
-        mime="text/markdown"
-    )
+    st.subheader(T["share_header"])
 
+    # 準備分享的文字摘要
+    share_summary = f"""✈️ 我們的【{st.session_state.last_dest}】{st.session_state.last_days} 親子旅遊規劃出來囉！
+
+👨‍👩‍👧‍👦 成員配置：{adult_count} 大 {child_count} 小
+🏨 住宿風格：{hotel_style_pref}（每晚約 NT$ {hotel_budget_per_night:,}）
+🎒 旅遊型態：{travel_style_selection.split('（')[0]}
+
+完整行程、推車動線與詳細總預算表可直接參考附件或旅行手冊！"""
+
+    col_btn_down, col_btn_line = st.columns([1, 1])
+
+    with col_btn_down:
+        st.download_button(
+            label=T["download_btn"],
+            data=st.session_state.base_plan_content,
+            file_name=f"{st.session_state.last_dest}_Travel_Plan.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+
+    with col_btn_line:
+        # LINE 分享 URL Scheme
+        line_text_encoded = urllib.parse.quote(share_summary)
+        line_share_url = f"https://line.me/R/msg/text/?{line_text_encoded}"
+        st.link_button(
+            T["line_share_btn"],
+            line_share_url,
+            use_container_width=True
+        )
+
+    # 複製文字分享區塊
+    with st.expander(f"📋 {T['copy_share_btn']}", expanded=False):
+        st.text_area(
+            "長按或點擊複製以下文字，直接貼到家庭通訊群組：",
+            value=share_summary + f"\n\n---\n【完整行程預覽】\n" + st.session_state.base_plan_content[:600] + "\n...(略，請見手冊檔案)",
+            height=150
+        )
+
+    # 雨天室內備案按鈕
+    st.markdown("---")
     st.subheader(T["rainy_header"])
     if st.button(T["rainy_btn"], type="secondary"):
         rain_lang_inst = "Respond in Traditional Chinese." if lang_key == "zh" else "Respond in English."
@@ -546,6 +596,7 @@ if st.session_state.plan_generated:
         else:
             rain_box.error(T["server_busy"])
 
+    # 行前清單
     with st.expander(T["packing_expander"], expanded=False):
         c1, c2, c3 = st.columns(3)
         if lang_key == "zh":
@@ -581,6 +632,7 @@ if st.session_state.plan_generated:
                 st.checkbox("Baby purees/snacks & water bottle", value=False)
                 st.checkbox("Diapers (Trip Days × 5 pcs)", value=False)
 
+    # 延伸對話
     st.markdown("---")
     st.subheader(T["chat_header"])
     for msg in st.session_state.chat_history[2:]:
