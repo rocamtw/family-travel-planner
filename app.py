@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 import random
+import json
 import urllib.parse
 import pandas as pd
 from datetime import date, timedelta, datetime
@@ -49,7 +50,7 @@ LANG_PACK = {
     "zh": {
         "title": "✈️ 家庭專屬 最佳機票、住宿預算試算 ＋ AI 對話行程智囊",
         "missing_key": "⚠️ 系統尚未在 Streamlit Secrets 偵測到 GEMINI_KEY，請至後台 Settings -> Secrets 完成設定。",
-        "members_expander": "👨‍👩‍👧‍‍👦 成員配置與體力需求（點此展開修改）",
+        "members_expander": "👨‍👩‍👧‍👦 成員配置與體力需求（點此展開修改）",
         "travel_style_label": "旅遊型態偏好",
         "travel_style_opts": [
             "🎒 自由行（彈性自主、深入漫遊、推車/地鐵/計程車接駁）",
@@ -105,9 +106,6 @@ LANG_PACK = {
         "submit_btn": "🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整行程",
         "download_btn": "📥 下載完整手冊 (.md)",
         "share_header": "📤 分享與導出行程給親友",
-        "copy_share_btn": "📋 複製精簡行程摘要（可直接貼入 LINE / 記事本）",
-        "line_share_btn": "💬 一鍵分享至 LINE",
-        "copied_success": "✅ 已成功複製到剪貼簿！可直接貼給家人查看。",
         "rainy_header": "☔ 氣候應變：室內親子備案",
         "rainy_btn": "🔄 一鍵切換全室內備案",
         "packing_expander": "🎒 行前打包清單（互動確認）",
@@ -175,9 +173,6 @@ LANG_PACK = {
         "submit_btn": "🚀 Recommend Best Timing, Estimate Total Budget + Generate Itinerary",
         "download_btn": "📥 Download Travel Handbook (.md)",
         "share_header": "📤 Share Itinerary with Family & Friends",
-        "copy_share_btn": "📋 Copy Itinerary Summary (Ready for LINE / Notes)",
-        "line_share_btn": "💬 Share to LINE",
-        "copied_success": "✅ Copied to clipboard! Ready to paste into family chat.",
         "rainy_header": "☔ Weather Backup: Indoor Family-friendly Itinerary",
         "rainy_btn": "🔄 Switch to 100% Indoor Rainy-day Backup",
         "packing_expander": "🎒 Pre-trip Packing Checklist (Interactive)",
@@ -537,49 +532,114 @@ Language requirement: {lang_instruction}
             plan_box.error(T["server_busy"])
 
 # ==========================================
-# 輔助功能區塊（下載 ＋ 分享按鈕）
+# 輔助功能區塊（萬用原生態分享 ＋ 一鍵複製 ＋ 導出）
 # ==========================================
 if st.session_state.plan_generated:
     st.markdown("---")
     st.subheader(T["share_header"])
 
-    # 準備分享的文字摘要
-    share_summary = f"""✈️ 我們的【{st.session_state.last_dest}】{st.session_state.last_days} 親子旅遊規劃出來囉！
+    # 組織結構清晰的分享內文
+    share_title = f"✈️ 【{st.session_state.last_dest}】{st.session_state.last_days} 親子旅遊規劃手冊"
+    share_summary = f"""✈️ 我們的【{st.session_state.last_dest}】{st.session_state.last_days} 親子旅遊企劃出爐囉！
 
-👨‍👩‍👧‍👦 成員配置：{adult_count} 大 {child_count} 小
-🏨 住宿風格：{hotel_style_pref}（每晚約 NT$ {hotel_budget_per_night:,}）
+👨‍‍👩‍👧‍👦 成員配置：{adult_count} 位成人、{child_count} 位小孩
+🏨 住宿風格：{hotel_style_pref}（每晚預算約 NT$ {hotel_budget_per_night:,}）
 🎒 旅遊型態：{travel_style_selection.split('（')[0]}
 
-完整行程、推車動線與詳細總預算表可直接參考附件或旅行手冊！"""
+【精選行程與預算重點】
+{st.session_state.base_plan_content[:650]}
+... (點擊連結或下載手冊查看完整 Google Maps 地圖動線與各項明細)"""
 
-    col_btn_down, col_btn_line = st.columns([1, 1])
+    # 下載手冊按鈕
+    st.download_button(
+        label=T["download_btn"],
+        data=st.session_state.base_plan_content,
+        file_name=f"{st.session_state.last_dest}_Travel_Plan.md",
+        mime="text/markdown",
+        use_container_width=True
+    )
 
-    with col_btn_down:
-        st.download_button(
-            label=T["download_btn"],
-            data=st.session_state.base_plan_content,
-            file_name=f"{st.session_state.last_dest}_Travel_Plan.md",
-            mime="text/markdown",
-            use_container_width=True
-        )
+    # 萬用原生分享（Web Share API）＋ 一鍵剪貼簿複製組件
+    json_share_data = json.dumps({
+        "title": share_title,
+        "text": share_summary
+    })
 
-    with col_btn_line:
-        # LINE 分享 URL Scheme
+    share_component_html = f"""
+    <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+        <!-- 萬用原生分享按鈕（調用手機系統分享：LINE/WhatsApp/微信/AirDrop/備忘錄等） -->
+        <button id="nativeShareBtn" style="
+            flex: 1; min-width: 160px; padding: 12px 16px;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: white; border: none; border-radius: 8px;
+            font-size: 15px; font-weight: 600; cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.2s ease;
+        ">
+            📱 呼叫手機萬用分享選單
+        </button>
+
+        <!-- 一鍵複製全文至剪貼簿 -->
+        <button id="copySummaryBtn" style="
+            flex: 1; min-width: 160px; padding: 12px 16px;
+            background: #f1f5f9; color: #1e293b;
+            border: 1px solid #cbd5e1; border-radius: 8px;
+            font-size: 15px; font-weight: 600; cursor: pointer;
+            transition: all 0.2s ease;
+        ">
+            📋 一鍵複製行程摘要
+        </button>
+    </div>
+    <div id="copyToast" style="display: none; color: #16a34a; font-size: 13px; font-weight: 600; margin-top: 6px; text-align: center;">
+        ✅ 已成功複製到剪貼簿！可直接貼至任何通訊群組或筆記。
+    </div>
+
+    <script>
+    const shareData = {json_share_data};
+
+    // 處理手機/瀏覽器原生萬用分享
+    document.getElementById('nativeShareBtn').addEventListener('click', async () => {{
+        if (navigator.share) {{
+            try {{
+                await navigator.share({{
+                    title: shareData.title,
+                    text: shareData.text,
+                    url: window.location.href
+                }});
+            }} catch (err) {{
+                if (err.name !== 'AbortError') {{
+                    copyFallback();
+                }}
+            }}
+        }} else {{
+            copyFallback();
+        }}
+    }});
+
+    // 處理一鍵複製
+    document.getElementById('copySummaryBtn').addEventListener('click', () => {{
+        copyFallback();
+    }});
+
+    function copyFallback() {{
+        const fullContent = shareData.text + "\\n\\n🔗 線上查看與微調：" + window.location.href;
+        navigator.clipboard.writeText(fullContent).then(() => {{
+            const toast = document.getElementById('copyToast');
+            toast.style.display = 'block';
+            setTimeout(() => {{ toast.style.display = 'none'; }}, 4000);
+        }}).catch(() => {{
+            alert('複製失敗，請手動複製下方文字！');
+        }});
+    }}
+    </script>
+    """
+    st.components.v1.html(share_component_html, height=85)
+
+    # 快捷通訊捷徑（LINE 作為快捷小按鈕）
+    with st.expander("💬 快速直達 LINE 群組討論", expanded=False):
         line_text_encoded = urllib.parse.quote(share_summary)
         line_share_url = f"https://line.me/R/msg/text/?{line_text_encoded}"
-        st.link_button(
-            T["line_share_btn"],
-            line_share_url,
-            use_container_width=True
-        )
-
-    # 複製文字分享區塊
-    with st.expander(f"📋 {T['copy_share_btn']}", expanded=False):
-        st.text_area(
-            "長按或點擊複製以下文字，直接貼到家庭通訊群組：",
-            value=share_summary + f"\n\n---\n【完整行程預覽】\n" + st.session_state.base_plan_content[:600] + "\n...(略，請見手冊檔案)",
-            height=150
-        )
+        st.link_button("🚀 點此直接打開 LINE 分享", line_share_url, use_container_width=True)
 
     # 雨天室內備案按鈕
     st.markdown("---")
