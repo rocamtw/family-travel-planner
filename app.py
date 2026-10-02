@@ -3,6 +3,7 @@ import time
 import random
 import json
 import urllib.parse
+import requests
 import pandas as pd
 from datetime import date, timedelta, datetime
 from google import genai
@@ -44,12 +45,60 @@ def get_monitor():
 monitor = get_monitor()
 
 # ==========================================
+# 景點照片智慧抓取引擎 (Wikipedia & Wikimedia Commons API)
+# ==========================================
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_place_image(place_name: str) -> str:
+    """
+    透過維基百科開放 API 依景點關鍵字搜尋真實照片（免 API Key、穩定不破圖）
+    """
+    cleaned_name = place_name.split("（")[0].split("(")[0].strip()
+    api_url = "https://zh.wikipedia.org/w/api.php"
+    headers = {"User-Agent": "FamilyTravelPlannerBot/1.0 (family-travel-planner@streamlit.app)"}
+    
+    # 1. 搜尋對應頁面
+    search_params = {
+        "action": "query",
+        "list": "search",
+        "srsearch": cleaned_name,
+        "format": "json",
+        "srlimit": 1
+    }
+    try:
+        res = requests.get(api_url, params=search_params, headers=headers, timeout=3)
+        if res.status_code == 200:
+            data = res.json()
+            search_results = data.get("query", {}).get("search", [])
+            if search_results:
+                page_title = search_results[0]["title"]
+                # 2. 取得該頁面的封面縮圖 (800px)
+                img_params = {
+                    "action": "query",
+                    "titles": page_title,
+                    "prop": "pageimages",
+                    "format": "json",
+                    "pithumbsize": 800
+                }
+                img_res = requests.get(api_url, params=img_params, headers=headers, timeout=3)
+                if img_res.status_code == 200:
+                    img_data = img_res.json()
+                    pages = img_data.get("query", {}).get("pages", {})
+                    for _, page_info in pages.items():
+                        if "thumbnail" in page_info:
+                            return page_info["thumbnail"]["source"]
+    except Exception:
+        pass
+    
+    # 若維基百科無收錄，回傳精美旅行預設風景
+    return "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80"
+
+# ==========================================
 # 語系字典配置 (i18n Translation Dictionary)
 # ==========================================
 LANG_PACK = {
     "zh": {
         "title": "✈️ 家庭專屬 最佳機票、住宿預算試算 ＋ AI 對話行程智囊",
-        "missing_key": "⚠️ 系統尚未在 Streamlit Secrets 偵測到 GEMINI_KEY，請至後台 Settings -> Secrets 完成設定。",
+        "missing_key": "⚠️️ 系統尚未在 Streamlit Secrets 偵測到 GEMINI_KEY，請至後台 Settings -> Secrets 完成設定。",
         "members_expander": "👨‍👩‍👧‍👦 成員配置與體力需求（點此展開修改）",
         "travel_style_label": "旅遊型態偏好",
         "travel_style_opts": [
@@ -106,6 +155,7 @@ LANG_PACK = {
         "submit_btn": "🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整行程",
         "download_btn": "📥 下載完整手冊 (.md)",
         "share_header": "📤 分享與導出行程給親友",
+        "spot_photo_header": "📸 精選行程代表實景相片",
         "rainy_header": "☔ 氣候應變：室內親子備案",
         "rainy_btn": "🔄 一鍵切換全室內備案",
         "packing_expander": "🎒 行前打包清單（互動確認）",
@@ -173,6 +223,7 @@ LANG_PACK = {
         "submit_btn": "🚀 Recommend Best Timing, Estimate Total Budget + Generate Itinerary",
         "download_btn": "📥 Download Travel Handbook (.md)",
         "share_header": "📤 Share Itinerary with Family & Friends",
+        "spot_photo_header": "📸 Highlight Attraction Photos",
         "rainy_header": "☔ Weather Backup: Indoor Family-friendly Itinerary",
         "rainy_btn": "🔄 Switch to 100% Indoor Rainy-day Backup",
         "packing_expander": "🎒 Pre-trip Packing Checklist (Interactive)",
@@ -532,17 +583,33 @@ Language requirement: {lang_instruction}
             plan_box.error(T["server_busy"])
 
 # ==========================================
-# 輔助功能區塊（萬用原生態分享 ＋ 一鍵複製 ＋ 導出）
+# 輔助功能區塊（實景照片 ＋ 萬用原生態分享 ＋ 導出）
 # ==========================================
 if st.session_state.plan_generated:
+    # 📸 精選景點實景相片卡片區塊
+    st.markdown("---")
+    st.subheader(T["spot_photo_header"])
+    clean_city = st.session_state.last_dest.split("(")[0].replace("🇯🇵 日本 -", "").replace("🇰🇷 韓國 -", "").replace("🇸🇬 新加坡 -", "").replace("🇹🇭 泰國 -", "").replace("🇻🇳 越南 -", "").strip()
+    
+    col_p1, col_p2, col_p3 = st.columns(3)
+    with col_p1:
+        img_url_1 = fetch_place_image(clean_city)
+        st.image(img_url_1, caption=f"📍 {clean_city} 城市風光", use_container_width=True)
+    with col_p2:
+        img_url_2 = fetch_place_image(f"{clean_city} 親子景點")
+        st.image(img_url_2, caption=f"🎡 {clean_city} 人氣地標", use_container_width=True)
+    with col_p3:
+        img_url_3 = fetch_place_image(f"{clean_city} 觀光")
+        st.image(img_url_3, caption=f"🏨 {clean_city} 漫遊景致", use_container_width=True)
+
+    # 📤 分享與導出區塊
     st.markdown("---")
     st.subheader(T["share_header"])
 
-    # 組織結構清晰的分享內文
     share_title = f"✈️ 【{st.session_state.last_dest}】{st.session_state.last_days} 親子旅遊規劃手冊"
     share_summary = f"""✈️ 我們的【{st.session_state.last_dest}】{st.session_state.last_days} 親子旅遊企劃出爐囉！
 
-👨‍‍👩‍👧‍👦 成員配置：{adult_count} 位成人、{child_count} 位小孩
+👨‍👩‍👧‍👦 成員配置：{adult_count} 位成人、{child_count} 位小孩
 🏨 住宿風格：{hotel_style_pref}（每晚預算約 NT$ {hotel_budget_per_night:,}）
 🎒 旅遊型態：{travel_style_selection.split('（')[0]}
 
@@ -550,7 +617,6 @@ if st.session_state.plan_generated:
 {st.session_state.base_plan_content[:650]}
 ... (點擊連結或下載手冊查看完整 Google Maps 地圖動線與各項明細)"""
 
-    # 下載手冊按鈕
     st.download_button(
         label=T["download_btn"],
         data=st.session_state.base_plan_content,
@@ -559,7 +625,6 @@ if st.session_state.plan_generated:
         use_container_width=True
     )
 
-    # 萬用原生分享（Web Share API）＋ 一鍵剪貼簿複製組件
     json_share_data = json.dumps({
         "title": share_title,
         "text": share_summary
@@ -567,7 +632,6 @@ if st.session_state.plan_generated:
 
     share_component_html = f"""
     <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
-        <!-- 萬用原生分享按鈕（調用手機系統分享：LINE/WhatsApp/微信/AirDrop/備忘錄等） -->
         <button id="nativeShareBtn" style="
             flex: 1; min-width: 160px; padding: 12px 16px;
             background: linear-gradient(135deg, #2563eb, #1d4ed8);
@@ -579,7 +643,6 @@ if st.session_state.plan_generated:
             📱 呼叫手機萬用分享選單
         </button>
 
-        <!-- 一鍵複製全文至剪貼簿 -->
         <button id="copySummaryBtn" style="
             flex: 1; min-width: 160px; padding: 12px 16px;
             background: #f1f5f9; color: #1e293b;
@@ -597,7 +660,6 @@ if st.session_state.plan_generated:
     <script>
     const shareData = {json_share_data};
 
-    // 處理手機/瀏覽器原生萬用分享
     document.getElementById('nativeShareBtn').addEventListener('click', async () => {{
         if (navigator.share) {{
             try {{
@@ -616,7 +678,6 @@ if st.session_state.plan_generated:
         }}
     }});
 
-    // 處理一鍵複製
     document.getElementById('copySummaryBtn').addEventListener('click', () => {{
         copyFallback();
     }});
@@ -635,7 +696,6 @@ if st.session_state.plan_generated:
     """
     st.components.v1.html(share_component_html, height=85)
 
-    # 快捷通訊捷徑（LINE 作為快捷小按鈕）
     with st.expander("💬 快速直達 LINE 群組討論", expanded=False):
         line_text_encoded = urllib.parse.quote(share_summary)
         line_share_url = f"https://line.me/R/msg/text/?{line_text_encoded}"
