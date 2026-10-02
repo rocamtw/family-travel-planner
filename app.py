@@ -3,7 +3,6 @@ import time
 import random
 import json
 import urllib.parse
-import requests
 import pandas as pd
 from datetime import date, timedelta, datetime
 from google import genai
@@ -45,60 +44,12 @@ def get_monitor():
 monitor = get_monitor()
 
 # ==========================================
-# 景點照片智慧抓取引擎 (Wikipedia & Wikimedia Commons API)
-# ==========================================
-@st.cache_data(ttl=86400, show_spinner=False)
-def fetch_place_image(place_name: str) -> str:
-    """
-    透過維基百科開放 API 依景點關鍵字搜尋真實照片（免 API Key、穩定不破圖）
-    """
-    cleaned_name = place_name.split("（")[0].split("(")[0].strip()
-    api_url = "https://zh.wikipedia.org/w/api.php"
-    headers = {"User-Agent": "FamilyTravelPlannerBot/1.0 (family-travel-planner@streamlit.app)"}
-    
-    # 1. 搜尋對應頁面
-    search_params = {
-        "action": "query",
-        "list": "search",
-        "srsearch": cleaned_name,
-        "format": "json",
-        "srlimit": 1
-    }
-    try:
-        res = requests.get(api_url, params=search_params, headers=headers, timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            search_results = data.get("query", {}).get("search", [])
-            if search_results:
-                page_title = search_results[0]["title"]
-                # 2. 取得該頁面的封面縮圖 (800px)
-                img_params = {
-                    "action": "query",
-                    "titles": page_title,
-                    "prop": "pageimages",
-                    "format": "json",
-                    "pithumbsize": 800
-                }
-                img_res = requests.get(api_url, params=img_params, headers=headers, timeout=3)
-                if img_res.status_code == 200:
-                    img_data = img_res.json()
-                    pages = img_data.get("query", {}).get("pages", {})
-                    for _, page_info in pages.items():
-                        if "thumbnail" in page_info:
-                            return page_info["thumbnail"]["source"]
-    except Exception:
-        pass
-    
-    # 若維基百科無收錄，回傳精美旅行預設風景
-    return "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80"
-
-# ==========================================
 # 語系字典配置 (i18n Translation Dictionary)
 # ==========================================
 LANG_PACK = {
     "zh": {
         "title": "✈️ 家庭專屬 最佳機票、住宿預算試算 ＋ AI 對話行程智囊",
-        "missing_key": "⚠️️ 系統尚未在 Streamlit Secrets 偵測到 GEMINI_KEY，請至後台 Settings -> Secrets 完成設定。",
+        "missing_key": "⚠️ 系統尚未在 Streamlit Secrets 偵測到 GEMINI_KEY，請至後台 Settings -> Secrets 完成設定。",
         "members_expander": "👨‍👩‍👧‍👦 成員配置與體力需求（點此展開修改）",
         "travel_style_label": "旅遊型態偏好",
         "travel_style_opts": [
@@ -155,7 +106,6 @@ LANG_PACK = {
         "submit_btn": "🚀 推薦最佳檔期、計算全家總預算 ＋ 產出完整行程",
         "download_btn": "📥 下載完整手冊 (.md)",
         "share_header": "📤 分享與導出行程給親友",
-        "spot_photo_header": "📸 精選行程代表實景相片",
         "rainy_header": "☔ 氣候應變：室內親子備案",
         "rainy_btn": "🔄 一鍵切換全室內備案",
         "packing_expander": "🎒 行前打包清單（互動確認）",
@@ -223,7 +173,6 @@ LANG_PACK = {
         "submit_btn": "🚀 Recommend Best Timing, Estimate Total Budget + Generate Itinerary",
         "download_btn": "📥 Download Travel Handbook (.md)",
         "share_header": "📤 Share Itinerary with Family & Friends",
-        "spot_photo_header": "📸 Highlight Attraction Photos",
         "rainy_header": "☔ Weather Backup: Indoor Family-friendly Itinerary",
         "rainy_btn": "🔄 Switch to 100% Indoor Rainy-day Backup",
         "packing_expander": "🎒 Pre-trip Packing Checklist (Interactive)",
@@ -583,26 +532,9 @@ Language requirement: {lang_instruction}
             plan_box.error(T["server_busy"])
 
 # ==========================================
-# 輔助功能區塊（實景照片 ＋ 萬用原生態分享 ＋ 導出）
+# 輔助功能區塊（萬用原生態分享 ＋ 導出）
 # ==========================================
 if st.session_state.plan_generated:
-    # 📸 精選景點實景相片卡片區塊
-    st.markdown("---")
-    st.subheader(T["spot_photo_header"])
-    clean_city = st.session_state.last_dest.split("(")[0].replace("🇯🇵 日本 -", "").replace("🇰🇷 韓國 -", "").replace("🇸🇬 新加坡 -", "").replace("🇹🇭 泰國 -", "").replace("🇻🇳 越南 -", "").strip()
-    
-    col_p1, col_p2, col_p3 = st.columns(3)
-    with col_p1:
-        img_url_1 = fetch_place_image(clean_city)
-        st.image(img_url_1, caption=f"📍 {clean_city} 城市風光", use_container_width=True)
-    with col_p2:
-        img_url_2 = fetch_place_image(f"{clean_city} 親子景點")
-        st.image(img_url_2, caption=f"🎡 {clean_city} 人氣地標", use_container_width=True)
-    with col_p3:
-        img_url_3 = fetch_place_image(f"{clean_city} 觀光")
-        st.image(img_url_3, caption=f"🏨 {clean_city} 漫遊景致", use_container_width=True)
-
-    # 📤 分享與導出區塊
     st.markdown("---")
     st.subheader(T["share_header"])
 
